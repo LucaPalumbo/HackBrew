@@ -1,0 +1,58 @@
+name: ${COMPOSE_PROJECT_NAME:-hackbrew}
+
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-hackbrew}
+    ports:
+      - "${HACKBREW_BIND_ADDRESS:-127.0.0.1}:${HACKBREW_PORT:-8080}:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  mongo:
+    image: mongo:8.0@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  backend-tools:
+    profiles: [tools]
+    build:
+      context: .
+      target: tools
+    volumes:
+      - .:/workspace:z
+    environment:
+      RUFF_CACHE_DIR: /tmp/ruff-cache
+      MYPY_CACHE_DIR: /tmp/mypy-cache
+
+  frontend:
+    profiles: [tools, dev]
+    build:
+      context: .
+      target: frontend-dev
+    volumes:
+      - ./src/frontend:/workspace/src/frontend:z
+      - /workspace/src/frontend/node_modules
+
+volumes:
+  mongo-data:

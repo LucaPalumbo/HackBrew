@@ -2,11 +2,11 @@
 
 ## Project Structure & Module Organization
 
-This directory is currently an empty project scaffold. No source code, tests, assets, or build configuration exist yet. As implementation begins, keep application code in `src/`, automated tests in `tests/`, static resources in `assets/`, and supporting documentation in `docs/`, unless the chosen framework requires another layout. Group related functionality into focused modules. Add a `README.md` describing the project and its actual directory structure.
+Application code lives in `src/hackbrew/` (Python/FastAPI) and `src/frontend/` (Vue/TypeScript). Automated tests live in `tests/` and supporting documentation in `docs/`. Keep frontend resources within the frontend framework's layout. Group related functionality into focused modules and keep `README.md` aligned with the actual project structure.
 
 ## Build, Test, and Development Commands
 
-No build, test, or local development commands are configured. When introducing tooling, document the exact setup, development, build, and test commands in `README.md`. Prefer a small, consistent command interface through the selected ecosystem's package scripts or a task runner. Do not assume commands such as `npm test` or `make build` work until their configuration is committed.
+Use `scripts/hackbrew` for Docker-based setup, development, build, formatting, lint, typechecking, and tests. `README.md` documents the exact supported commands. Keep all application tooling in containers; do not introduce a requirement for host-installed Python, Node, or MongoDB. Update the documentation when changing the command interface.
 
 ## Coding Style & Naming Conventions
 
@@ -14,11 +14,11 @@ Follow the standard conventions of the language and framework selected for the p
 
 ## Testing Guidelines
 
-No testing framework or coverage threshold has been established. Add automated tests alongside new behavior and bug fixes once the implementation stack is selected. Organize tests by feature, use descriptive names that explain the expected behavior, and follow the framework's discovery conventions. Document how to run the full suite and individual tests.
+Tests use pytest through the application's public HTTP interface and Playwright for browser-visible behavior, with real MongoDB in an isolated Docker environment. Assertions should observe external behavior rather than private helpers or database internals. Add automated tests alongside new behavior and bug fixes, organize them by feature, and document full-suite and individual-test commands. Test cleanup must remain isolated from the application's persistent volume.
 
 ## Commit & Pull Request Guidelines
 
-There is no Git history from which to infer commit conventions. Use concise, imperative commit subjects, such as `Add initial project configuration`. Pull requests should describe the change, its purpose, and verification performed. Link relevant issues and include screenshots for visible interface changes. Explicitly identify setup changes or checks that could not be run.
+Use concise, imperative commit subjects, such as `Add initial project configuration`. Pull requests should describe the change, its purpose, and verification performed. Link relevant issues and include screenshots for visible interface changes. Explicitly identify setup changes or checks that could not be run.
 
 ## Security & Configuration
 

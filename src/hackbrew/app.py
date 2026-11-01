@@ -1,0 +1,109 @@
+"""Public HTTP application."""
+
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pymongo import MongoClient, ReturnDocument
+from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError, PyMongoError
+
+from hackbrew.models import GatewayReading
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    with MongoClient[dict[str, Any]](
+        os.environ.get("MONGODB_URI", "mongodb://mongo:27017"),
+        serverSelectionTimeoutMS=2000,
+        connectTimeoutMS=2000,
+        tz_aware=True,
+    ) as client:
+        application.state.database = client[os.environ.get("MONGODB_DATABASE", "hackbrew")]
+        yield
+
+
+app = FastAPI(title="HackBrew", lifespan=lifespan)
+
+
+def database(request: Request) -> Database[dict[str, Any]]:
+    return cast(Database[dict[str, Any]], request.app.state.database)
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_reading(_request: Request, error: RequestValidationError) -> JSONResponse:
+    details = [
+        {"loc": issue["loc"], "msg": issue["msg"], "type": issue["type"]}
+        for issue in error.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": details})
+
+
+@app.exception_handler(PyMongoError)
+async def database_unavailable(_request: Request, _error: PyMongoError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Archivio delle letture temporaneamente non disponibile."},
+    )
+
+
+@app.get("/api/health")
+def health(request: Request) -> dict[str, str]:
+    database(request).command("ping")
+    return {"status": "ok"}
+
+
+@app.get("/api/readings/latest")
+def latest_reading(request: Request) -> dict[str, object]:
+    reading = (
+        database(request)
+        .get_collection("latest_reading")
+        .find_one({"_id": "latest"}, {"_id": False})
+    )
+    return {"reading": reading}
+
+
+@app.post("/telemetry")
+def receive_reading(payload: GatewayReading, request: Request) -> dict[str, object]:
+    reading = payload.model_dump(
+        include={"temperature", "specific_gravity", "battery", "timestamp"}
+    )
+    reading["specific_gravity"] = payload.specific_gravity / 1000
+    reading["received_at"] = datetime.now(UTC)
+    reading["_id"] = "latest"
+    collection = database(request).get_collection("latest_reading")
+    update = [
+        {
+            "$replaceWith": {
+                "$cond": [
+                    {"$gt": [payload.timestamp, {"$ifNull": ["$timestamp", -1]}]},
+                    {"$literal": reading},
+                    "$$ROOT",
+                ]
+            }
+        }
+    ]
+    try:
+        latest = collection.find_one_and_update(
+            {"_id": "latest"}, update, upsert=True, return_document=ReturnDocument.AFTER
+        )
+    except DuplicateKeyError:
+        latest = collection.find_one_and_update(
+            {"_id": "latest"}, update, return_document=ReturnDocument.AFTER
+        )
+    if latest is None:
+        raise PyMongoError("Latest reading was not persisted")
+    latest.pop("_id", None)
+    return {"reading": latest}
+
+
+frontend_dist = os.environ.get("HACKBREW_FRONTEND_DIST")
+if frontend_dist and Path(frontend_dist).is_dir():
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

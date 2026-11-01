@@ -1,0 +1,63 @@
+services:
+  mongo:
+    image: mongo:8.0@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+    volumes:
+      - test-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      target: runtime
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DATABASE: hackbrew_test
+    networks:
+      default:
+        aliases: [hackbrew-test]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  tests:
+    build:
+      context: .
+      target: tests
+    environment:
+      HACKBREW_BASE_URL: http://hackbrew-test:8000
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DATABASE: hackbrew_test
+    depends_on:
+      app:
+        condition: service_healthy
+    shm_size: 1gb
+
+  api-tests:
+    build:
+      context: .
+      target: tools
+    volumes:
+      - ./tests:/workspace/tests:ro,z
+    environment:
+      HACKBREW_BASE_URL: http://hackbrew-test:8000
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DATABASE: hackbrew_test
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  test-mongo-data:

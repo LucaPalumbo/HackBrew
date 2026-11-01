@@ -1,0 +1,1 @@
+"""HackBrew fermentation monitoring application."""

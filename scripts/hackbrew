@@ -1,0 +1,73 @@
+#!/bin/sh
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$project_root"
+
+action=${1:-help}
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+
+case "$action" in
+    up)
+        docker compose -f compose.yaml up --build --detach --wait "$@"
+        ;;
+    down)
+        docker compose -f compose.yaml --profile dev --profile tools down "$@"
+        ;;
+    build)
+        docker compose -f compose.yaml build app "$@"
+        ;;
+    dev)
+        docker compose -f compose.yaml -f compose.dev.yaml --profile dev up --build "$@"
+        ;;
+    lint)
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" backend-tools ruff check src/hackbrew tests
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" frontend npm run lint
+        ;;
+    format)
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" backend-tools ruff format src/hackbrew tests
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" frontend npm run format
+        ;;
+    format-check)
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" backend-tools ruff format --check src/hackbrew tests
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" frontend npm run format-check
+        ;;
+    typecheck)
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" backend-tools mypy
+        docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" frontend npm run typecheck
+        ;;
+    test)
+        hackbrew_tests_project="hackbrew-tests-$$"
+        cleanup() {
+            test_exit_code=$?
+            trap - EXIT
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml down --volumes --remove-orphans
+            exit "$test_exit_code"
+        }
+        trap cleanup EXIT
+        docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml build app tests
+        docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
+        docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests pytest "$@"
+        if [ "$#" -eq 0 ]; then
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests python -m tests.check_restart seed
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml restart app
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests python -m tests.check_restart verify
+        fi
+        ;;
+    check)
+        "$0" format-check
+        "$0" lint
+        "$0" typecheck
+        "$0" test
+        ;;
+    help)
+        printf '%s\n' 'Usage: ./scripts/hackbrew {up|down|build|dev|lint|format|format-check|typecheck|test [pytest arguments]|check}'
+        ;;
+    *)
+        printf '%s\n' "Unknown command: $action" >&2
+        exit 2
+        ;;
+esac
