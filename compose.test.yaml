@@ -16,6 +16,7 @@ services:
     environment:
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DATABASE: hackbrew_test
+      HACKBREW_FRESHNESS_SECONDS: 60
     networks:
       default:
         aliases: [hackbrew-test]

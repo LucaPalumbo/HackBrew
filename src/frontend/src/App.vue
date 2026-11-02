@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 type Reading = {
   temperature: number
@@ -9,9 +9,40 @@ type Reading = {
   received_at: string
 }
 
+type Snapshot = {
+  reading: Reading | null
+  freshness_seconds: number
+  server_time: number
+}
+
 const reading = ref<Reading | null>(null)
 const isLoading = ref(false)
 const error = ref('')
+const connection = ref<'connecting' | 'live' | 'reconnecting'>('connecting')
+const connectionStatus = computed(() => {
+  if (connection.value === 'live') return 'Collegamento live attivo'
+  if (connection.value === 'reconnecting')
+    return 'Collegamento live interrotto. Riconnessione automatica…'
+  return 'Collegamento live in corso…'
+})
+let events: EventSource | undefined
+let streamRevision = 0
+let disposed = false
+let freshnessTimer: ReturnType<typeof setInterval> | undefined
+const freshnessSeconds = ref<number | null>(null)
+const serverReference = ref<{ time: number; observedAt: number } | null>(null)
+const clock = ref(performance.now())
+const dataStatus = computed(() => {
+  if (!reading.value) return 'Nessuna lettura'
+  if (!serverReference.value || freshnessSeconds.value === null)
+    return 'Verifica freschezza…'
+  const serverNow =
+    serverReference.value.time +
+    (clock.value - serverReference.value.observedAt) / 1000
+  return serverNow - reading.value.timestamp >= freshnessSeconds.value
+    ? 'Dati non aggiornati'
+    : 'Lettura disponibile'
+})
 
 const temperatureFormat = new Intl.NumberFormat('it-IT', {
   minimumFractionDigits: 1,
@@ -23,6 +54,7 @@ const dateFormat = new Intl.DateTimeFormat('it-IT', {
 })
 
 async function loadLatest() {
+  const revision = streamRevision
   isLoading.value = true
   error.value = ''
   try {
@@ -31,16 +63,70 @@ async function loadLatest() {
       signal: AbortSignal.timeout(10000),
     })
     if (!response.ok) throw new Error('Reading unavailable')
-    const payload: { reading: Reading | null } = await response.json()
-    reading.value = payload.reading
+    const payload: Snapshot = await response.json()
+    if (!disposed && revision === streamRevision) applySnapshot(payload)
   } catch {
-    error.value = 'Non è stato possibile recuperare la lettura. Riprova.'
+    if (!disposed && revision === streamRevision)
+      error.value = 'Non è stato possibile recuperare la lettura. Riprova.'
   } finally {
     isLoading.value = false
   }
 }
 
-onMounted(loadLatest)
+function applySnapshot(snapshot: Snapshot) {
+  reading.value = snapshot.reading
+  freshnessSeconds.value = snapshot.freshness_seconds
+  clock.value = performance.now()
+  serverReference.value = {
+    time: snapshot.server_time,
+    observedAt: clock.value,
+  }
+}
+
+function connectLive() {
+  events?.close()
+  if (!navigator.onLine) {
+    connection.value = 'reconnecting'
+    return
+  }
+  connection.value = 'connecting'
+  events = new EventSource('/api/readings/events')
+  events.addEventListener('reading', (event: MessageEvent<string>) => {
+    const snapshot: Snapshot = JSON.parse(event.data)
+    streamRevision += 1
+    applySnapshot(snapshot)
+    error.value = ''
+    connection.value = 'live'
+  })
+  events.onerror = () => {
+    connection.value = 'reconnecting'
+  }
+  events.addEventListener('unavailable', () => {
+    connection.value = 'reconnecting'
+  })
+}
+
+function disconnectLive() {
+  events?.close()
+  connection.value = 'reconnecting'
+}
+
+onMounted(() => {
+  void loadLatest()
+  window.addEventListener('offline', disconnectLive)
+  window.addEventListener('online', connectLive)
+  connectLive()
+  freshnessTimer = setInterval(() => {
+    clock.value = performance.now()
+  }, 1000)
+})
+onUnmounted(() => {
+  disposed = true
+  window.removeEventListener('offline', disconnectLive)
+  window.removeEventListener('online', connectLive)
+  events?.close()
+  clearInterval(freshnessTimer)
+})
 </script>
 
 <template>
@@ -83,6 +169,22 @@ onMounted(loadLatest)
       </div>
 
       <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p
+        class="connection-status"
+        :class="{ error: connection === 'reconnecting' }"
+        :role="connection === 'reconnecting' ? 'alert' : 'status'"
+        aria-label="Collegamento live"
+      >
+        {{ connectionStatus }}
+      </p>
+      <p
+        class="data-status"
+        :class="{ stale: dataStatus === 'Dati non aggiornati' }"
+        role="status"
+        aria-label="Stato dei dati"
+      >
+        {{ dataStatus }}
+      </p>
       <p v-if="isLoading && !reading" class="loading" role="status">
         Caricamento lettura…
       </p>
@@ -96,8 +198,8 @@ onMounted(loadLatest)
         <p class="eyebrow">Pronti a ricevere</p>
         <h2 id="empty-heading">In attesa della prima lettura</h2>
         <p>
-          Non abbiamo ancora ricevuto dati dalla pillola. Controlla il
-          collegamento e aggiorna quando vuoi.
+          Non abbiamo ancora ricevuto dati dalla pillola. Le nuove letture
+          appariranno automaticamente qui.
         </p>
       </section>
       <section v-else-if="reading" aria-label="Ultima lettura">

@@ -185,6 +185,23 @@ h1 {
   color: #65746a;
   text-align: center;
 }
+.data-status {
+  color: #53685b;
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+.connection-status {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #53685b;
+}
+.data-status.stale {
+  color: #80551a;
+  background: #fff1d5;
+  border: 1px solid #e6cc9c;
+  border-radius: 12px;
+  padding: 14px 18px;
+}
 .reading-heading {
   display: flex;
   justify-content: space-between;

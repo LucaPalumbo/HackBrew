@@ -9,10 +9,13 @@ from tests.payloads import gateway_lettura
 
 
 def test_no_lettura_is_reported_explicitly_before_first_message(api: httpx.Client) -> None:
+    before = datetime.now(UTC).timestamp()
     response = api.get("/api/readings/latest")
 
     assert response.status_code == 200
-    assert response.json() == {"reading": None}
+    assert response.json()["reading"] is None
+    assert response.json()["freshness_seconds"] == 60
+    assert before <= response.json()["server_time"] <= datetime.now(UTC).timestamp()
 
 
 def test_gateway_lettura_is_retrievable_in_agreed_units_with_fractional_timestamp(
@@ -66,7 +69,7 @@ def test_invalid_lettura_does_not_replace_good_measurements(
 
     assert response.status_code == 422
     assert response.json()["detail"]
-    assert api.get("/api/readings/latest").json() == baseline
+    assert api.get("/api/readings/latest").json()["reading"] == baseline["reading"]
 
 
 @pytest.mark.parametrize("timestamp", [1700000000.123455, 1700000000.123456])
@@ -81,7 +84,7 @@ def test_older_or_repeated_lettura_cannot_replace_latest(
 
     assert response.status_code == 200
     assert response.json() == baseline
-    assert api.get("/api/readings/latest").json() == baseline
+    assert api.get("/api/readings/latest").json()["reading"] == baseline["reading"]
 
 
 def test_concurrent_letture_leave_the_newest_measurement_visible(api: httpx.Client) -> None:
@@ -107,7 +110,7 @@ def test_missing_required_measurement_is_rejected(api: httpx.Client, field: str)
 
     assert response.status_code == 422
     assert response.json()["detail"]
-    assert api.get("/api/readings/latest").json() == {"reading": None}
+    assert api.get("/api/readings/latest").json()["reading"] is None
 
 
 @pytest.mark.parametrize("body", ["{broken", "null", "[]"])
@@ -116,4 +119,4 @@ def test_malformed_or_non_object_message_is_rejected(api: httpx.Client, body: st
 
     assert response.status_code == 422
     assert response.json()["detail"]
-    assert api.get("/api/readings/latest").json() == {"reading": None}
+    assert api.get("/api/readings/latest").json()["reading"] is None

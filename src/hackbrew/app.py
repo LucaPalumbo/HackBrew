@@ -1,5 +1,6 @@
 """Public HTTP application."""
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -10,16 +11,22 @@ from typing import Any, cast
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from pymongo import MongoClient, ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError, PyMongoError
+from starlette.concurrency import run_in_threadpool
 
 from hackbrew.models import GatewayReading
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    freshness_seconds = int(os.environ.get("HACKBREW_FRESHNESS_SECONDS", "300"))
+    if freshness_seconds <= 0:
+        raise ValueError("HACKBREW_FRESHNESS_SECONDS must be a positive integer")
+    application.state.freshness_seconds = freshness_seconds
     with MongoClient[dict[str, Any]](
         os.environ.get("MONGODB_URI", "mongodb://mongo:27017"),
         serverSelectionTimeoutMS=2000,
@@ -67,7 +74,31 @@ def latest_reading(request: Request) -> dict[str, object]:
         .get_collection("latest_reading")
         .find_one({"_id": "latest"}, {"_id": False})
     )
-    return {"reading": reading}
+    return {
+        "reading": reading,
+        "freshness_seconds": request.app.state.freshness_seconds,
+        "server_time": datetime.now(UTC).timestamp(),
+    }
+
+
+@app.get("/api/readings/events", response_class=EventSourceResponse)
+async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
+    previous: object = object()
+    while not await request.is_disconnected():
+        try:
+            snapshot = await run_in_threadpool(latest_reading, request)
+        except PyMongoError:
+            # Closing the stream triggers EventSource's automatic reconnection.
+            yield ServerSentEvent(event="unavailable", data={}, retry=2000)
+            return
+        if snapshot["reading"] != previous:
+            yield ServerSentEvent(
+                event="reading",
+                data=snapshot,
+                retry=2000,
+            )
+            previous = snapshot["reading"]
+        await asyncio.sleep(1)
 
 
 @app.post("/telemetry")

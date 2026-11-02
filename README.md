@@ -1,8 +1,8 @@
 # HackBrew
 
-Dashboard web per monitorare una pillola nel fermentatore. Questa prima versione riceve le letture del gateway HTTP esistente, conserva l'ultima in MongoDB e mostra densità SG, temperatura °C, batteria e orario di acquisizione. Il pulsante **Aggiorna lettura** recupera i dati salvati.
+Dashboard web per monitorare una pillola nel fermentatore. Riceve le letture del gateway HTTP esistente, conserva l'ultima in MongoDB e aggiorna automaticamente densità SG, temperatura °C, batteria e orario di acquisizione. Il pulsante **Aggiorna lettura** permette anche un recupero manuale.
 
-Frontend Vue 3 con TypeScript e Vite, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. Aggiornamenti live, fermentazioni e grafici sono descritti nei ticket successivi della [specifica](https://github.com/LucaPalumbo/HackBrew/issues/1).
+Frontend Vue 3 con TypeScript e Vite, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. Fermentazioni e grafici sono descritti nei ticket successivi della [specifica](https://github.com/LucaPalumbo/HackBrew/issues/1).
 
 ## Requisiti e avvio
 
@@ -32,6 +32,9 @@ Le impostazioni predefinite funzionano senza un file di configurazione locale. P
 | `HACKBREW_PORT` | `8080` | Porta dell'applicazione. |
 | `HACKBREW_FRONTEND_PORT` | `5173` | Porta Vite in sviluppo. |
 | `MONGODB_DATABASE` | `hackbrew` | Database dell'applicazione. |
+| `HACKBREW_FRESHNESS_SECONDS` | `300` | Età massima della lettura, in secondi interi positivi, prima di segnalare dati non aggiornati. |
+
+Dopo aver modificato `.env`, esegui nuovamente `./scripts/hackbrew up` per applicare la configurazione.
 
 Il gateway deve inviare le letture all'indirizzo raggiungibile del computer che esegue HackBrew, usando l'operazione `POST /telemetry`. Se gira sullo stesso computer, la destinazione predefinita è `http://localhost:8080/telemetry`. Per un gateway su un altro computer della rete locale, configura indirizzo di ascolto e destinazione in modo coerente.
 
@@ -75,10 +78,25 @@ Il timestamp dell'esempio è storico: il gateway reale deve usare il proprio ora
 | Operazione | Risultato |
 | --- | --- |
 | `POST /telemetry` | Salva atomicamente la lettura se è più recente e restituisce l'ultima disponibile. |
-| `GET /api/readings/latest` | Restituisce `reading: null` prima della prima lettura, altrimenti le misure normalizzate e i due istanti. |
+| `GET /api/readings/latest` | Snapshot con `reading: null` prima della prima lettura, altrimenti le misure normalizzate e i due istanti; include `freshness_seconds` e `server_time`. |
+| `GET /api/readings/events` | Stream SSE: invia subito lo stato persistito e poi le variazioni dell'ultima lettura, con eventi `reading`. |
 | `GET /api/health` | Verifica che l'applicazione possa raggiungere MongoDB. |
 
 Un messaggio non valido restituisce HTTP 422. Se l'archivio non è disponibile, l'applicazione restituisce HTTP 503 invece di confermare un salvataggio inesistente. La documentazione interattiva delle API è disponibile all'indirizzo `/docs`.
+
+## Aggiornamenti live e freschezza
+
+La dashboard distingue **Nessuna lettura**, **Lettura disponibile** e **Dati non aggiornati**. L'età si riferisce all'acquisizione sul gateway, usando l'orario del server come riferimento; oltre la soglia conserva misure e orari reali. La soglia predefinita di cinque minuti è un criterio di freschezza, non la frequenza di trasmissione della pillola né una diagnosi di un dispositivo offline. L'esempio storico sopra apparirà quindi come non aggiornato.
+
+Il collegamento live ha uno stato separato. Se si interrompe, la pagina conserva i valori e segnala la riconnessione automatica. Alla ripresa riceve un nuovo stato completo da MongoDB, recuperando anche le letture perse durante l'interruzione. Il recupero HTTP fornisce anche soglia e orario del server, così la freschezza viene valutata anche quando il live non è ancora disponibile.
+
+Ogni connessione SSE legge MongoDB all'apertura e controlla le variazioni ogni secondo. Non usa notifiche in memoria come archivio. Gli eventi `reading` contengono `reading` (anche `null`), `freshness_seconds` e `server_time` (secondi Unix). Il browser usa il riferimento del server e il tempo trascorso per aggiornare lo stato anche senza nuovi eventi. Alla riconnessione viene sempre inviata l'ultima lettura persistita, anche con `Last-Event-ID`: non è uno stream dello storico. Se MongoDB diventa irraggiungibile, lo stream invia `unavailable` e si chiude per consentire un nuovo tentativo; le connessioni inattive ricevono commenti di mantenimento.
+
+Per osservare il protocollo, in un terminale separato:
+
+```sh
+curl --no-buffer http://localhost:8080/api/readings/events
+```
 
 ## Sviluppo
 
@@ -117,9 +135,11 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/integration/test_readings.py
 ./scripts/hackbrew test tests/integration/test_readings.py -k older
 ./scripts/hackbrew test tests/browser/test_dashboard.py
+./scripts/hackbrew test tests/integration/test_live_readings.py
+./scripts/hackbrew test tests/browser/test_live_dashboard.py
 ```
 
-La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. Il controllo completo verifica inoltre che un riavvio del container applicativo conservi i dati.
+La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. Il controllo completo verifica inoltre che un riavvio del container applicativo conservi i dati.
 
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. Al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
 
