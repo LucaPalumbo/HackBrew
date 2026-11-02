@@ -1,15 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import FermentationControls from './FermentationControls.vue'
+import FermentationArchive from './FermentationArchive.vue'
+import FermentationHistory from './FermentationHistory.vue'
 import type { Fermentation } from './fermentations'
-
-type Reading = {
-  temperature: number
-  specific_gravity: number
-  battery: number
-  timestamp: number
-  received_at: string
-}
+import type { Reading } from './readings'
 
 type Snapshot = {
   reading: Reading | null
@@ -22,6 +17,21 @@ type Snapshot = {
 const diagnosticReading = ref<Reading | null>(null)
 const fermentation = ref<Fermentation | null>(null)
 const fermentationReading = ref<Reading | null>(null)
+const selectedId = ref(
+  new URLSearchParams(window.location.search).get('fermentation') || null,
+)
+function selectFermentation(identifier: string | null) {
+  if (selectedId.value === identifier) return
+  const url = new URL(window.location.href)
+  if (identifier) url.searchParams.set('fermentation', identifier)
+  else url.searchParams.delete('fermentation')
+  window.history.pushState(null, '', url)
+  selectedId.value = identifier
+}
+function restoreSelection() {
+  selectedId.value =
+    new URLSearchParams(window.location.search).get('fermentation') || null
+}
 const reading = computed(() =>
   fermentation.value ? fermentationReading.value : diagnosticReading.value,
 )
@@ -36,6 +46,7 @@ const connectionStatus = computed(() => {
 })
 let events: EventSource | undefined
 let streamRevision = 0
+const historyRevision = ref(0)
 let disposed = false
 let freshnessTimer: ReturnType<typeof setInterval> | undefined
 const freshnessSeconds = ref<number | null>(null)
@@ -84,6 +95,7 @@ async function loadLatest() {
 }
 
 function applySnapshot(snapshot: Snapshot) {
+  historyRevision.value += 1
   diagnosticReading.value = snapshot.reading
   fermentation.value = snapshot.fermentation
   fermentationReading.value = snapshot.fermentation_reading
@@ -127,6 +139,7 @@ onMounted(() => {
   void loadLatest()
   window.addEventListener('offline', disconnectLive)
   window.addEventListener('online', connectLive)
+  window.addEventListener('popstate', restoreSelection)
   connectLive()
   freshnessTimer = setInterval(() => {
     clock.value = performance.now()
@@ -136,6 +149,7 @@ onUnmounted(() => {
   disposed = true
   window.removeEventListener('offline', disconnectLive)
   window.removeEventListener('online', connectLive)
+  window.removeEventListener('popstate', restoreSelection)
   events?.close()
   clearInterval(freshnessTimer)
 })
@@ -149,7 +163,11 @@ onUnmounted(() => {
         <span>Hack<span class="brand-accent">Brew</span></span>
       </a>
       <span class="mode">{{
-        fermentation ? 'Fermentazione in corso' : 'Modalità diagnostica'
+        selectedId
+          ? 'Storico fermentazioni'
+          : fermentation
+            ? 'Fermentazione in corso'
+            : 'Modalità diagnostica'
       }}</span>
     </header>
 
@@ -163,6 +181,7 @@ onUnmounted(() => {
           </p>
         </div>
         <button
+          v-if="!selectedId"
           class="refresh"
           type="button"
           :disabled="isLoading"
@@ -182,12 +201,18 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <FermentationArchive
+        :selected-id="selectedId"
+        :active-id="fermentation?.id ?? null"
+        @select="selectFermentation"
+      />
       <FermentationControls
+        v-if="!selectedId"
         :fermentation="fermentation"
         :loading="isLoading"
         @changed="loadLatest"
       />
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p v-if="error && !selectedId" class="error" role="alert">{{ error }}</p>
       <p
         class="connection-status"
         :class="{ error: connection === 'reconnecting' }"
@@ -196,132 +221,148 @@ onUnmounted(() => {
       >
         {{ connectionStatus }}
       </p>
-      <p
-        class="data-status"
-        :class="{ stale: dataStatus === 'Dati non aggiornati' }"
-        role="status"
-        aria-label="Stato dei dati"
-      >
-        {{ dataStatus }}
-      </p>
-      <p v-if="isLoading && !reading" class="loading" role="status">
-        Caricamento lettura…
-      </p>
+      <template v-if="!selectedId">
+        <p
+          class="data-status"
+          :class="{ stale: dataStatus === 'Dati non aggiornati' }"
+          role="status"
+          aria-label="Stato dei dati"
+        >
+          {{ dataStatus }}
+        </p>
+        <p v-if="isLoading && !reading" class="loading" role="status">
+          Caricamento lettura…
+        </p>
 
-      <section
-        v-else-if="!reading && !error"
-        class="empty"
-        aria-labelledby="empty-heading"
-      >
-        <span class="empty-symbol" aria-hidden="true">◌</span>
-        <p class="eyebrow">Pronti a ricevere</p>
-        <h2 id="empty-heading">
-          {{
-            fermentation
-              ? 'In attesa della prima lettura della fermentazione'
-              : 'In attesa della prima lettura'
-          }}
-        </h2>
-        <p v-if="fermentation">
-          Le letture acquisite dall’avvio di questa fermentazione appariranno
-          qui. I dati diagnostici precedenti restano separati.
-        </p>
-        <p v-else>
-          Non abbiamo ancora ricevuto dati dalla pillola. Le nuove letture
-          appariranno automaticamente qui.
-        </p>
-      </section>
-      <section v-else-if="reading" aria-label="Ultima lettura">
-        <div class="reading-heading">
-          <h2>Misure della pillola</h2>
-          <span>Ultima rilevazione disponibile</span>
-        </div>
-        <div class="metrics">
-          <section
-            class="metric metric-primary"
-            aria-labelledby="density-label"
-          >
-            <div class="metric-heading">
-              <h3 id="density-label">Densità</h3>
-              <span class="metric-symbol" aria-hidden="true">ρ</span>
-            </div>
-            <p class="metric-value">
-              <span>{{ reading.specific_gravity.toFixed(3) }}</span>
-              <span class="metric-unit">SG</span>
-            </p>
-            <p class="metric-caption">Densità relativa</p>
-          </section>
-          <section class="metric" aria-labelledby="temperature-label">
-            <div class="metric-heading">
-              <h3 id="temperature-label">Temperatura</h3>
-              <span class="metric-symbol" aria-hidden="true">°</span>
-            </div>
-            <p class="metric-value">
-              <span>{{ temperatureFormat.format(reading.temperature) }}</span>
-              <span class="metric-unit">°C</span>
-            </p>
-            <p class="metric-caption">Nel fermentatore</p>
-          </section>
-          <section class="metric" aria-labelledby="battery-label">
-            <div class="metric-heading">
-              <h3 id="battery-label">Batteria</h3>
-              <svg class="battery-icon" aria-hidden="true" viewBox="0 0 26 16">
-                <rect
-                  x="1"
-                  y="2"
-                  width="21"
-                  height="12"
-                  rx="3"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                />
-                <path
-                  d="M24 6v4"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </div>
-            <p class="metric-value">
-              <span>{{ reading.battery.toFixed(0) }}</span>
-              <span class="metric-unit">%</span>
-            </p>
-            <div class="battery-track" aria-hidden="true">
-              <div :style="{ width: `${reading.battery}%` }"></div>
-            </div>
-            <p class="metric-caption">Carica della pillola</p>
-          </section>
-        </div>
-        <div class="acquisition">
-          <div>
-            <p class="eyebrow">Acquisizione della lettura</p>
-            <time
-              aria-label="Acquisizione della lettura"
-              :datetime="new Date(reading.timestamp * 1000).toISOString()"
-              >{{ dateFormat.format(new Date(reading.timestamp * 1000)) }}</time
-            >
-          </div>
-          <p>
-            Ricevuta da HackBrew<br />
-            <time :datetime="reading.received_at">{{
-              dateFormat.format(new Date(reading.received_at))
-            }}</time>
+        <section
+          v-else-if="!reading && !error"
+          class="empty"
+          aria-labelledby="empty-heading"
+        >
+          <span class="empty-symbol" aria-hidden="true">◌</span>
+          <p class="eyebrow">Pronti a ricevere</p>
+          <h2 id="empty-heading">
+            {{
+              fermentation
+                ? 'In attesa della prima lettura della fermentazione'
+                : 'In attesa della prima lettura'
+            }}
+          </h2>
+          <p v-if="fermentation">
+            Le letture acquisite dall’avvio di questa fermentazione appariranno
+            qui. I dati diagnostici precedenti restano separati.
           </p>
-        </div>
-      </section>
-
+          <p v-else>
+            Non abbiamo ancora ricevuto dati dalla pillola. Le nuove letture
+            appariranno automaticamente qui.
+          </p>
+        </section>
+        <section v-else-if="reading" aria-label="Ultima lettura">
+          <div class="reading-heading">
+            <h2>Misure della pillola</h2>
+            <span>Ultima rilevazione disponibile</span>
+          </div>
+          <div class="metrics">
+            <section
+              class="metric metric-primary"
+              aria-labelledby="density-label"
+            >
+              <div class="metric-heading">
+                <h3 id="density-label">Densità</h3>
+                <span class="metric-symbol" aria-hidden="true">ρ</span>
+              </div>
+              <p class="metric-value">
+                <span>{{ reading.specific_gravity.toFixed(3) }}</span>
+                <span class="metric-unit">SG</span>
+              </p>
+              <p class="metric-caption">Densità relativa</p>
+            </section>
+            <section class="metric" aria-labelledby="temperature-label">
+              <div class="metric-heading">
+                <h3 id="temperature-label">Temperatura</h3>
+                <span class="metric-symbol" aria-hidden="true">°</span>
+              </div>
+              <p class="metric-value">
+                <span>{{ temperatureFormat.format(reading.temperature) }}</span>
+                <span class="metric-unit">°C</span>
+              </p>
+              <p class="metric-caption">Nel fermentatore</p>
+            </section>
+            <section class="metric" aria-labelledby="battery-label">
+              <div class="metric-heading">
+                <h3 id="battery-label">Batteria</h3>
+                <svg
+                  class="battery-icon"
+                  aria-hidden="true"
+                  viewBox="0 0 26 16"
+                >
+                  <rect
+                    x="1"
+                    y="2"
+                    width="21"
+                    height="12"
+                    rx="3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                  <path
+                    d="M24 6v4"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </div>
+              <p class="metric-value">
+                <span>{{ reading.battery.toFixed(0) }}</span>
+                <span class="metric-unit">%</span>
+              </p>
+              <div class="battery-track" aria-hidden="true">
+                <div :style="{ width: `${reading.battery}%` }"></div>
+              </div>
+              <p class="metric-caption">Carica della pillola</p>
+            </section>
+          </div>
+          <div class="acquisition">
+            <div>
+              <p class="eyebrow">Acquisizione della lettura</p>
+              <time
+                aria-label="Acquisizione della lettura"
+                :datetime="new Date(reading.timestamp * 1000).toISOString()"
+                >{{
+                  dateFormat.format(new Date(reading.timestamp * 1000))
+                }}</time
+              >
+            </div>
+            <p>
+              Ricevuta da HackBrew<br />
+              <time :datetime="reading.received_at">{{
+                dateFormat.format(new Date(reading.received_at))
+              }}</time>
+            </p>
+          </div>
+        </section>
+      </template>
+      <FermentationHistory
+        :identifier="selectedId ?? fermentation?.id ?? null"
+        :revision="historyRevision"
+        :live="!selectedId"
+      />
       <footer class="footnote">
         <span>{{
-          fermentation
-            ? `Fermentazione attiva: ${fermentation.name}`
-            : 'Nessuna fermentazione attiva'
+          selectedId
+            ? 'Consultazione storico'
+            : fermentation
+              ? `Fermentazione attiva: ${fermentation.name}`
+              : 'Nessuna fermentazione attiva'
         }}</span>
         <span>{{
-          fermentation
-            ? 'Ultima lettura della fermentazione'
-            : 'Ultima lettura della pillola'
+          selectedId
+            ? 'Valori dell’intervallo selezionato'
+            : fermentation
+              ? 'Ultima lettura della fermentazione'
+              : 'Ultima lettura della pillola'
         }}</span>
       </footer>
     </main>

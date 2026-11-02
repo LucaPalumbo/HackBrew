@@ -12,6 +12,7 @@
     "format-check": "prettier --check src index.html vite.config.ts tsconfig.json package.json eslint.config.mjs"
   },
   "dependencies": {
+    "chart.js": "4.6.1",
     "vue": "3.5.44"
   },
   "overrides": {

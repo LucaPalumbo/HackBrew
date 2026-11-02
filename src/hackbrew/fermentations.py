@@ -1,10 +1,14 @@
 """Fermentazione lifecycle and persisted monitoring intervals."""
 
+import math
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from bson import ObjectId
+from bson.errors import InvalidId
+from fastapi import APIRouter, HTTPException, Query, Request
 from pymongo import ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
@@ -22,7 +26,7 @@ def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
         unique=True,
         partialFilterExpression={"status": "active"},
     )
-    db.fermentation_readings.create_index([("fermentation_id", 1), ("timestamp", 1)])
+    db.fermentation_readings.create_index([("fermentation_id", 1), ("timestamp", 1), ("_id", 1)])
 
 
 def monitoring_time() -> float:
@@ -44,6 +48,29 @@ def public_fermentation(document: dict[str, Any]) -> dict[str, Any]:
 def active_fermentation(db: Database[dict[str, Any]]) -> dict[str, Any] | None:
     document = db.fermentations.find_one({"status": "active"})
     return public_fermentation(document) if document else None
+
+
+@router.get("")
+def list_concluded(
+    request: Request,
+    q: str = Query(default="", max_length=200),
+    limit: int = Query(default=20, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    query: dict[str, Any] = {"status": "concluded"}
+    if q.strip():
+        query["name"] = {"$regex": re.escape(q.strip()), "$options": "i"}
+    documents = list(
+        database(request)
+        .fermentations.find(query)
+        .sort([("ended_at", -1), ("_id", -1)])
+        .skip(offset)
+        .limit(limit + 1)
+    )
+    return {
+        "fermentations": [public_fermentation(document) for document in documents[:limit]],
+        "next_offset": offset + limit if len(documents) > limit else None,
+    }
 
 
 @router.get("/active")
@@ -133,13 +160,38 @@ def active_snapshot(db: Database[dict[str, Any]]) -> dict[str, object]:
 
 
 @router.get("/{identifier}/readings")
-def get_readings(identifier: str, request: Request) -> dict[str, object]:
+def get_readings(
+    identifier: str,
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=200),
+    before: str | None = Query(default=None, max_length=100),
+) -> dict[str, object]:
     db = database(request)
     document = require_fermentation(db, identifier)
-    readings = db.fermentation_readings.find(
-        reading_filter(document), {"_id": False, "fermentation_id": False}
-    ).sort("timestamp", 1)
-    return {"readings": list(readings)}
+    query = reading_filter(document)
+    if before is not None:
+        try:
+            timestamp_text, cursor_identifier = before.split(":")
+            timestamp = float(timestamp_text)
+            if not math.isfinite(timestamp) or timestamp < 0:
+                raise ValueError
+            cursor_id = ObjectId(cursor_identifier)
+        except (ValueError, InvalidId):
+            raise HTTPException(422, "Cursore dello storico non valido.") from None
+        query["$or"] = [
+            {"timestamp": {"$lt": timestamp}},
+            {"timestamp": timestamp, "_id": {"$lt": cursor_id}},
+        ]
+    documents = list(
+        db.fermentation_readings.find(query, {"fermentation_id": False})
+        .sort([("timestamp", -1), ("_id", -1)])
+        .limit(limit + 1)
+    )
+    page = documents[:limit]
+    next_before = f"{page[-1]['timestamp']}:{page[-1]['_id']}" if len(documents) > limit else None
+    for reading in page:
+        reading.pop("_id")
+    return {"readings": list(reversed(page)), "next_before": next_before}
 
 
 def record_reading(db: Database[dict[str, Any]], reading: dict[str, Any]) -> None:

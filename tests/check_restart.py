@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from playwright.sync_api import expect, sync_playwright
 
 from tests.database import reset_test_database
 from tests.fermentations import assert_single_concurrent_start
@@ -65,6 +66,30 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
     assert api.get("/api/readings/latest").json()["reading"] == expected["reading"]
     assert api.get("/api/fermentations/active").json()["fermentation"] == expected["active"]
     assert api.post("/api/fermentations", json={"name": "Avvio bloccato"}).status_code == 409
+
+    concluded = api.get("/api/fermentations", params={"q": "Persistenza conclusa"}).json()[
+        "fermentations"
+    ]
+    assert [entry["id"] for entry in concluded] == [expected["concluded"]["id"]]
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(locale="it-IT", viewport={"width": 390, "height": 844})
+        page.set_default_timeout(5000)
+        page.goto(str(api.base_url))
+        page.get_by_role("button", name="Apri Persistenza conclusa").click()
+        expect(
+            page.get_by_role("heading", name="Storico: Persistenza conclusa", exact=True)
+        ).to_be_visible()
+        expect(page.get_by_role("img", name="Densità SG: 1 lettura")).to_be_visible()
+        table = page.get_by_role("table", name="Letture della fermentazione")
+        expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
+        expect(table.get_by_role("cell", name="63", exact=True)).to_be_visible()
+        page.reload()
+        expect(
+            page.get_by_role("heading", name="Storico: Persistenza conclusa", exact=True)
+        ).to_be_visible()
+        expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
+        browser.close()
 
     assert api.post(f"/api/fermentations/{expected['active']['id']}/end").status_code == 200
     assert_single_concurrent_start(api)

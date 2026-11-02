@@ -2,7 +2,7 @@
 
 Dashboard web per monitorare una pillola nel fermentatore. Permette di avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Densità SG, temperatura °C, batteria e orario di acquisizione si aggiornano automaticamente. Senza fermentazione attiva mostra l'ultima lettura diagnostica; il pulsante **Aggiorna lettura** permette anche un recupero manuale.
 
-Frontend Vue 3 con TypeScript e Vite, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. Grafici e consultazione delle fermentazioni concluse nell'interfaccia arriveranno con i ticket successivi della [specifica](https://github.com/LucaPalumbo/HackBrew/issues/1).
+Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. Il perimetro completo è descritto nella [specifica](https://github.com/LucaPalumbo/HackBrew/issues/1).
 
 ## Requisiti e avvio
 
@@ -94,13 +94,24 @@ Premi **Termina fermentazione** per concluderla: un messaggio conferma l'operazi
 | --- | --- |
 | `POST /api/fermentations` con `{"name":"Prima IPA"}` | Crea e avvia la fermentazione; HTTP 201 con `fermentation`. |
 | `GET /api/fermentations/active` | Restituisce `fermentation` attiva oppure `null`. |
+| `GET /api/fermentations?q=IPA&limit=20&offset=0` | Elenco delle concluse, più recenti per prime; ricerca letterale per nome senza distinzione di maiuscole. Restituisce `fermentations` e `next_offset`. Limite da 1 a 50, predefinito 20. |
 | `GET /api/fermentations/{id}` | Recupera nome, identificatore stabile, stato `active`/`concluded` e istanti UTC `started_at`/`ended_at`. |
-| `GET /api/fermentations/{id}/readings` | Recupera le letture persistite dell'intervallo in ordine di acquisizione, anche dopo il termine. |
+| `GET /api/fermentations/{id}/readings?limit=200` | Recupera la finestra più recente dell'intervallo in ordine di acquisizione, anche dopo il termine. Restituisce `readings` e `next_before`; limite da 1 a 200, predefinito 200. |
 | `POST /api/fermentations/{id}/end` | Conclude la fermentazione; HTTP 200 con lo stato aggiornato. |
 
 Un nuovo avvio mentre esiste una fermentazione attiva, o il termine di una già conclusa, restituisce HTTP 409 con una spiegazione. Un identificatore sconosciuto restituisce HTTP 404; un nome non valido restituisce HTTP 422. Un indice univoco parziale MongoDB sullo stato attivo impone il vincolo anche con richieste concorrenti; viene creato all'avvio dell'applicazione e rimane nel volume del database. [Riferimento MongoDB sugli indici parziali univoci](https://www.mongodb.com/docs/manual/core/index-partial/).
 
 Le letture sono associate in base al timestamp di acquisizione: **avvio incluso, termine escluso**. Gli estremi dell'intervallo sono conservati come secondi Unix UTC e restituiti dalle API come date ISO 8601. I campioni sono documenti separati, associati all'identificatore della fermentazione. Fuori dagli intervalli conosciuti viene mantenuta soltanto l'ultima lettura diagnostica. La gestione completa delle consegne duplicate e ritardate è prevista nella [issue #6](https://github.com/LucaPalumbo/HackBrew/issues/6).
+
+## Grafici e storico
+
+Durante una fermentazione attiva, i grafici di **densità SG** e **temperatura °C** e la tabella delle letture vengono caricati da MongoDB e aggiornati quando il collegamento live segnala una nuova lettura. La tabella include anche la **batteria %** e l'orario di acquisizione. Ogni punto dei grafici Chart.js corrisponde a un campione effettivo; non vengono aggiunti valori intermedi o campioni per colmare le lacune. I grafici a punti sono accompagnati dalla tabella, accessibile anche da tastiera. [Documentazione Chart.js: grafici a punti](https://www.chartjs.org/docs/latest/charts/scatter.html), [accessibilità](https://www.chartjs.org/docs/latest/general/accessibility.html).
+
+Nel riquadro **Storico fermentazioni**, cerca un nome o scegli una fermentazione conclusa. La schermata mostra il nome, lo stato, gli istanti di avvio e termine, i grafici e i valori di quella fermentazione. Gli aggiornamenti dell'attiva non cambiano la scelta. La selezione è salvata nell'indirizzo `?fermentation=<id>`, quindi funziona anche dopo un reload, con Indietro/Avanti o riaprendo il collegamento dopo un riavvio dell'applicazione. **Monitoraggio attuale** torna all'attiva o alla lettura diagnostica. Una fermentazione senza dati ha uno stato esplicito; un caricamento fallito mostra un errore con possibilità di riprovare.
+
+Ogni finestra contiene al massimo **200 letture originali**, condivise fra grafici e tabella; non è una media o una riduzione dei dati salvati. Usa **Letture precedenti** e **Letture più recenti** per consultare altre finestre. Il live aggiorna la finestra più recente dell'attiva; mentre consulti una finestra precedente questa rimane ferma. Le liste delle concluse mostrano 20 voci per pagina e permettono di caricarne altre. Su telefono i grafici si dispongono in verticale e la tabella scorre nel proprio riquadro.
+
+Per le API, passa il valore opaco `next_before` come parametro `before` alla richiesta successiva, mantenendo lo stesso identificatore di fermentazione. Il cursore distingue anche campioni con lo stesso timestamp; ogni pagina è ordinata per acquisizione e conserva i valori originali. `next_before: null` indica la fine dello storico. Un cursore o un limite non valido restituisce HTTP 422. Le risposte dell'endpoint delle letture sono ora paginate: per recuperare uno storico intero occorre seguire i cursori.
 
 ## Aggiornamenti live e freschezza
 
@@ -157,9 +168,12 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/browser/test_live_dashboard.py
 ./scripts/hackbrew test tests/integration/test_fermentations.py
 ./scripts/hackbrew test tests/browser/test_fermentation_dashboard.py
+./scripts/hackbrew test tests/integration/test_history.py
+./scripts/hackbrew test tests/browser/test_history_dashboard.py
+./scripts/hackbrew test tests/browser/test_history_pages.py
 ```
 
-La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. Il controllo completo conserva fuori dall'applicazione uno snapshot JSON di fermentazioni, letture e identificatori, riavvia il container applicativo e confronta lo stato recuperato attraverso le API. Verifica inoltre il vincolo di avvio concorrente dopo il riavvio.
+La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. Il controllo completo conserva fuori dall'applicazione uno snapshot JSON di fermentazioni, letture e identificatori, riavvia il container applicativo e confronta lo stato recuperato attraverso le API. Verifica inoltre la riapertura dei grafici storici nel browser e il vincolo di avvio concorrente dopo il riavvio.
 
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
 

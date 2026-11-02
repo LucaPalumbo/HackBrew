@@ -59,7 +59,7 @@ def test_letture_belong_only_to_their_monitoring_interval(api: httpx.Client) -> 
     assert api.post("/telemetry", json=gateway_lettura()).status_code == 200
     first = api.post("/api/fermentations", json={"name": "Prima IPA"}).json()["fermentation"]
     path = f"/api/fermentations/{first['id']}/readings"
-    assert api.get(path).json() == {"readings": []}
+    assert api.get(path).json()["readings"] == []
     started_at = datetime.fromisoformat(first["started_at"]).timestamp()
     assert (
         api.post("/telemetry", json=gateway_lettura(timestamp=started_at - 0.001)).status_code
@@ -91,7 +91,7 @@ def test_letture_belong_only_to_their_monitoring_interval(api: httpx.Client) -> 
     assert api.get("/api/readings/latest").json()["reading"]["specific_gravity"] == 1.030125
 
     second = api.post("/api/fermentations", json={"name": "Seconda IPA"}).json()["fermentation"]
-    assert api.get(f"/api/fermentations/{second['id']}/readings").json() == {"readings": []}
+    assert api.get(f"/api/fermentations/{second['id']}/readings").json()["readings"] == []
     assert api.get(path).json()["readings"] == collected
 
 
