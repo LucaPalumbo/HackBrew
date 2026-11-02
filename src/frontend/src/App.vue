@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import FermentationControls from './FermentationControls.vue'
+import type { Fermentation } from './fermentations'
 
 type Reading = {
   temperature: number
@@ -13,9 +15,16 @@ type Snapshot = {
   reading: Reading | null
   freshness_seconds: number
   server_time: number
+  fermentation: Fermentation | null
+  fermentation_reading: Reading | null
 }
 
-const reading = ref<Reading | null>(null)
+const diagnosticReading = ref<Reading | null>(null)
+const fermentation = ref<Fermentation | null>(null)
+const fermentationReading = ref<Reading | null>(null)
+const reading = computed(() =>
+  fermentation.value ? fermentationReading.value : diagnosticReading.value,
+)
 const isLoading = ref(false)
 const error = ref('')
 const connection = ref<'connecting' | 'live' | 'reconnecting'>('connecting')
@@ -33,7 +42,8 @@ const freshnessSeconds = ref<number | null>(null)
 const serverReference = ref<{ time: number; observedAt: number } | null>(null)
 const clock = ref(performance.now())
 const dataStatus = computed(() => {
-  if (!reading.value) return 'Nessuna lettura'
+  if (!reading.value)
+    return fermentation.value ? 'In attesa di letture' : 'Nessuna lettura'
   if (!serverReference.value || freshnessSeconds.value === null)
     return 'Verifica freschezza…'
   const serverNow =
@@ -74,7 +84,9 @@ async function loadLatest() {
 }
 
 function applySnapshot(snapshot: Snapshot) {
-  reading.value = snapshot.reading
+  diagnosticReading.value = snapshot.reading
+  fermentation.value = snapshot.fermentation
+  fermentationReading.value = snapshot.fermentation_reading
   freshnessSeconds.value = snapshot.freshness_seconds
   clock.value = performance.now()
   serverReference.value = {
@@ -136,7 +148,9 @@ onUnmounted(() => {
         <span class="brand-mark" aria-hidden="true">hb</span>
         <span>Hack<span class="brand-accent">Brew</span></span>
       </a>
-      <span class="mode">Modalità diagnostica</span>
+      <span class="mode">{{
+        fermentation ? 'Fermentazione in corso' : 'Modalità diagnostica'
+      }}</span>
     </header>
 
     <main>
@@ -168,6 +182,11 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <FermentationControls
+        :fermentation="fermentation"
+        :loading="isLoading"
+        @changed="loadLatest"
+      />
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <p
         class="connection-status"
@@ -196,8 +215,18 @@ onUnmounted(() => {
       >
         <span class="empty-symbol" aria-hidden="true">◌</span>
         <p class="eyebrow">Pronti a ricevere</p>
-        <h2 id="empty-heading">In attesa della prima lettura</h2>
-        <p>
+        <h2 id="empty-heading">
+          {{
+            fermentation
+              ? 'In attesa della prima lettura della fermentazione'
+              : 'In attesa della prima lettura'
+          }}
+        </h2>
+        <p v-if="fermentation">
+          Le letture acquisite dall’avvio di questa fermentazione appariranno
+          qui. I dati diagnostici precedenti restano separati.
+        </p>
+        <p v-else>
           Non abbiamo ancora ricevuto dati dalla pillola. Le nuove letture
           appariranno automaticamente qui.
         </p>
@@ -284,8 +313,16 @@ onUnmounted(() => {
       </section>
 
       <footer class="footnote">
-        <span>Nessuna fermentazione attiva</span>
-        <span>Ultima lettura della pillola</span>
+        <span>{{
+          fermentation
+            ? `Fermentazione attiva: ${fermentation.name}`
+            : 'Nessuna fermentazione attiva'
+        }}</span>
+        <span>{{
+          fermentation
+            ? 'Ultima lettura della fermentazione'
+            : 'Ultima lettura della pillola'
+        }}</span>
       </footer>
     </main>
   </div>

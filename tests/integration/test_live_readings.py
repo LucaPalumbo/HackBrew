@@ -63,3 +63,35 @@ def test_reconnected_stream_sends_current_saved_lettura_even_with_last_event_id(
         snapshot = next_snapshot(response.iter_lines())
         assert snapshot["reading"]["specific_gravity"] == 1.040125
         assert snapshot["reading"]["timestamp"] == 1700000001.123456
+
+
+def test_live_snapshot_tracks_fermentazione_and_its_own_latest_lettura(api: httpx.Client) -> None:
+    assert api.post("/telemetry", json=gateway_lettura()).status_code == 200
+    with api.stream("GET", "/api/readings/events") as response:
+        lines = response.iter_lines()
+        initial = next_snapshot(lines)
+        assert initial["fermentation"] is None
+        assert initial["fermentation_reading"] is None
+        started = api.post("/api/fermentations", json={"name": "IPA live"}).json()["fermentation"]
+        snapshot = next_snapshot(lines)
+        assert snapshot["fermentation"]["id"] == started["id"]
+        assert snapshot["fermentation"]["name"] == "IPA live"
+        assert snapshot["fermentation_reading"] is None
+        assert api.get("/api/readings/latest").json()["fermentation"]["id"] == started["id"]
+
+        timestamp = datetime.fromisoformat(started["started_at"]).timestamp() + 0.000001
+        assert (
+            api.post(
+                "/telemetry", json=gateway_lettura(timestamp=timestamp, specific_gravity=1040.125)
+            ).status_code
+            == 200
+        )
+        snapshot = next_snapshot(lines)
+        assert snapshot["fermentation_reading"]["specific_gravity"] == 1.040125
+        assert snapshot["fermentation_reading"]["timestamp"] == timestamp
+
+        assert api.post(f"/api/fermentations/{started['id']}/end").status_code == 200
+        snapshot = next_snapshot(lines)
+        assert snapshot["fermentation"] is None
+        assert snapshot["fermentation_reading"] is None
+        assert snapshot["reading"]["specific_gravity"] == 1.040125

@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -14,11 +14,13 @@ from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from pymongo import MongoClient, ReturnDocument
-from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from starlette.concurrency import run_in_threadpool
 
+from hackbrew.fermentations import active_snapshot, initialize_fermentations, record_reading
+from hackbrew.fermentations import router as fermentations_router
 from hackbrew.models import GatewayReading
+from hackbrew.storage import database
 
 
 @asynccontextmanager
@@ -34,14 +36,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         tz_aware=True,
     ) as client:
         application.state.database = client[os.environ.get("MONGODB_DATABASE", "hackbrew")]
+        initialize_fermentations(application.state.database)
         yield
 
 
 app = FastAPI(title="HackBrew", lifespan=lifespan)
-
-
-def database(request: Request) -> Database[dict[str, Any]]:
-    return cast(Database[dict[str, Any]], request.app.state.database)
+app.include_router(fermentations_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -76,6 +76,7 @@ def latest_reading(request: Request) -> dict[str, object]:
     )
     return {
         "reading": reading,
+        **active_snapshot(database(request)),
         "freshness_seconds": request.app.state.freshness_seconds,
         "server_time": datetime.now(UTC).timestamp(),
     }
@@ -91,13 +92,18 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
             # Closing the stream triggers EventSource's automatic reconnection.
             yield ServerSentEvent(event="unavailable", data={}, retry=2000)
             return
-        if snapshot["reading"] != previous:
+        persisted_state = (
+            snapshot["reading"],
+            snapshot["fermentation"],
+            snapshot["fermentation_reading"],
+        )
+        if persisted_state != previous:
             yield ServerSentEvent(
                 event="reading",
                 data=snapshot,
                 retry=2000,
             )
-            previous = snapshot["reading"]
+            previous = persisted_state
         await asyncio.sleep(1)
 
 
@@ -108,6 +114,7 @@ def receive_reading(payload: GatewayReading, request: Request) -> dict[str, obje
     )
     reading["specific_gravity"] = payload.specific_gravity / 1000
     reading["received_at"] = datetime.now(UTC)
+    record_reading(database(request), reading)
     reading["_id"] = "latest"
     collection = database(request).get_collection("latest_reading")
     update = [

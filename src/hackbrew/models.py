@@ -1,8 +1,14 @@
-"""The gateway's measurement contract."""
+"""Public input contracts for measurements and fermentazioni."""
 
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
+
+
+class FermentationName(BaseModel):
+    model_config = ConfigDict(strict=True, str_strip_whitespace=True)
+
+    name: str = Field(min_length=1)
 
 
 class GatewayReading(BaseModel):

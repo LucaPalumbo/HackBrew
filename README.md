@@ -1,8 +1,8 @@
 # HackBrew
 
-Dashboard web per monitorare una pillola nel fermentatore. Riceve le letture del gateway HTTP esistente, conserva l'ultima in MongoDB e aggiorna automaticamente densità SG, temperatura °C, batteria e orario di acquisizione. Il pulsante **Aggiorna lettura** permette anche un recupero manuale.
+Dashboard web per monitorare una pillola nel fermentatore. Permette di avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Densità SG, temperatura °C, batteria e orario di acquisizione si aggiornano automaticamente. Senza fermentazione attiva mostra l'ultima lettura diagnostica; il pulsante **Aggiorna lettura** permette anche un recupero manuale.
 
-Frontend Vue 3 con TypeScript e Vite, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. Fermentazioni e grafici sono descritti nei ticket successivi della [specifica](https://github.com/LucaPalumbo/HackBrew/issues/1).
+Frontend Vue 3 con TypeScript e Vite, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. Grafici e consultazione delle fermentazioni concluse nell'interfaccia arriveranno con i ticket successivi della [specifica](https://github.com/LucaPalumbo/HackBrew/issues/1).
 
 ## Requisiti e avvio
 
@@ -78,11 +78,29 @@ Il timestamp dell'esempio è storico: il gateway reale deve usare il proprio ora
 | Operazione | Risultato |
 | --- | --- |
 | `POST /telemetry` | Salva atomicamente la lettura se è più recente e restituisce l'ultima disponibile. |
-| `GET /api/readings/latest` | Snapshot con `reading: null` prima della prima lettura, altrimenti le misure normalizzate e i due istanti; include `freshness_seconds` e `server_time`. |
+| `GET /api/readings/latest` | Snapshot con `reading` diagnostica (anche `null`), `fermentation` attiva (anche `null`), `fermentation_reading` più recente del suo intervallo, `freshness_seconds` e `server_time`. |
 | `GET /api/readings/events` | Stream SSE: invia subito lo stato persistito e poi le variazioni dell'ultima lettura, con eventi `reading`. |
 | `GET /api/health` | Verifica che l'applicazione possa raggiungere MongoDB. |
 
 Un messaggio non valido restituisce HTTP 422. Se l'archivio non è disponibile, l'applicazione restituisce HTTP 503 invece di confermare un salvataggio inesistente. La documentazione interattiva delle API è disponibile all'indirizzo `/docs`.
+
+## Avviare e terminare una fermentazione
+
+Inserisci un nome nel campo **Nome della fermentazione** e premi **Avvia fermentazione**. Il nome non può essere vuoto o contenere soltanto spazi. La dashboard mostra nome, stato e istante di avvio; fino alla prima lettura del suo intervallo mostra un'attesa esplicita, anche se esistono letture diagnostiche precedenti.
+
+Premi **Termina fermentazione** per concluderla: un messaggio conferma l'operazione, mentre nome, identificatore, avvio, termine e letture rimangono salvati. Puoi quindi avviarne un'altra, che inizierà senza ereditare le letture della precedente. Le operazioni fallite mostrano un errore e permettono di riprovare. Anche un'altra scheda del browser riceve lo stato corrente attraverso il collegamento live.
+
+| Operazione | Risultato |
+| --- | --- |
+| `POST /api/fermentations` con `{"name":"Prima IPA"}` | Crea e avvia la fermentazione; HTTP 201 con `fermentation`. |
+| `GET /api/fermentations/active` | Restituisce `fermentation` attiva oppure `null`. |
+| `GET /api/fermentations/{id}` | Recupera nome, identificatore stabile, stato `active`/`concluded` e istanti UTC `started_at`/`ended_at`. |
+| `GET /api/fermentations/{id}/readings` | Recupera le letture persistite dell'intervallo in ordine di acquisizione, anche dopo il termine. |
+| `POST /api/fermentations/{id}/end` | Conclude la fermentazione; HTTP 200 con lo stato aggiornato. |
+
+Un nuovo avvio mentre esiste una fermentazione attiva, o il termine di una già conclusa, restituisce HTTP 409 con una spiegazione. Un identificatore sconosciuto restituisce HTTP 404; un nome non valido restituisce HTTP 422. Un indice univoco parziale MongoDB sullo stato attivo impone il vincolo anche con richieste concorrenti; viene creato all'avvio dell'applicazione e rimane nel volume del database. [Riferimento MongoDB sugli indici parziali univoci](https://www.mongodb.com/docs/manual/core/index-partial/).
+
+Le letture sono associate in base al timestamp di acquisizione: **avvio incluso, termine escluso**. Gli estremi dell'intervallo sono conservati come secondi Unix UTC e restituiti dalle API come date ISO 8601. I campioni sono documenti separati, associati all'identificatore della fermentazione. Fuori dagli intervalli conosciuti viene mantenuta soltanto l'ultima lettura diagnostica. La gestione completa delle consegne duplicate e ritardate è prevista nella [issue #6](https://github.com/LucaPalumbo/HackBrew/issues/6).
 
 ## Aggiornamenti live e freschezza
 
@@ -90,7 +108,7 @@ La dashboard distingue **Nessuna lettura**, **Lettura disponibile** e **Dati non
 
 Il collegamento live ha uno stato separato. Se si interrompe, la pagina conserva i valori e segnala la riconnessione automatica. Alla ripresa riceve un nuovo stato completo da MongoDB, recuperando anche le letture perse durante l'interruzione. Il recupero HTTP fornisce anche soglia e orario del server, così la freschezza viene valutata anche quando il live non è ancora disponibile.
 
-Ogni connessione SSE legge MongoDB all'apertura e controlla le variazioni ogni secondo. Non usa notifiche in memoria come archivio. Gli eventi `reading` contengono `reading` (anche `null`), `freshness_seconds` e `server_time` (secondi Unix). Il browser usa il riferimento del server e il tempo trascorso per aggiornare lo stato anche senza nuovi eventi. Alla riconnessione viene sempre inviata l'ultima lettura persistita, anche con `Last-Event-ID`: non è uno stream dello storico. Se MongoDB diventa irraggiungibile, lo stream invia `unavailable` e si chiude per consentire un nuovo tentativo; le connessioni inattive ricevono commenti di mantenimento.
+Ogni connessione SSE legge MongoDB all'apertura e controlla le variazioni ogni secondo. Non usa notifiche in memoria come archivio. Gli eventi `reading` contengono lo stesso snapshot di `GET /api/readings/latest`, inclusi fermentazione e relativa lettura, soglia e `server_time` (secondi Unix). Il browser usa il riferimento del server e il tempo trascorso per aggiornare lo stato anche senza nuovi eventi. Alla riconnessione viene sempre inviato lo stato persistito corrente, anche con `Last-Event-ID`: non è uno stream dello storico. Se MongoDB diventa irraggiungibile, lo stream invia `unavailable` e si chiude per consentire un nuovo tentativo; le connessioni inattive ricevono commenti di mantenimento.
 
 Per osservare il protocollo, in un terminale separato:
 
@@ -137,11 +155,13 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/browser/test_dashboard.py
 ./scripts/hackbrew test tests/integration/test_live_readings.py
 ./scripts/hackbrew test tests/browser/test_live_dashboard.py
+./scripts/hackbrew test tests/integration/test_fermentations.py
+./scripts/hackbrew test tests/browser/test_fermentation_dashboard.py
 ```
 
-La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. Il controllo completo verifica inoltre che un riavvio del container applicativo conservi i dati.
+La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. Il controllo completo conserva fuori dall'applicazione uno snapshot JSON di fermentazioni, letture e identificatori, riavvia il container applicativo e confronta lo stato recuperato attraverso le API. Verifica inoltre il vincolo di avvio concorrente dopo il riavvio.
 
-Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. Al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
+Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
 
 ## Struttura
 

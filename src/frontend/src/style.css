@@ -129,6 +129,69 @@ h1 {
   opacity: 0.65;
   cursor: wait;
 }
+.fermentation-panel {
+  margin-bottom: 28px;
+  padding: 24px;
+  background: #fdfefa;
+  border: 1px solid #dfe5d9;
+  border-radius: 20px;
+}
+.fermentation-panel h2 {
+  margin: 0 0 16px;
+  font-size: 21px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.fermentation-panel .eyebrow {
+  margin-bottom: 10px;
+}
+.fermentation-active,
+.fermentation-form {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.fermentation-active > div,
+.fermentation-form > div {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+.fermentation-period,
+.operation-notice {
+  color: #53685b;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.fermentation-period {
+  margin: 0;
+}
+.fermentation-form label {
+  display: block;
+  margin: 0 0 8px;
+  color: #53685b;
+  font-size: 13px;
+}
+.fermentation-form input {
+  width: 100%;
+  max-width: 420px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #bac8b7;
+  border-radius: 8px;
+  background: #fff;
+  color: #17382f;
+  font: inherit;
+}
+.fermentation-form input:focus-visible {
+  outline: 3px solid #b57826;
+  outline-offset: 2px;
+}
+.fermentation-panel .refresh {
+  margin-top: 0;
+}
 .empty {
   min-height: 340px;
   display: flex;
@@ -172,6 +235,10 @@ h1 {
   padding-top: 20px;
   margin-top: 30px;
   font-size: 12px;
+}
+.footnote > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .error {
   background: #fff0e9;
