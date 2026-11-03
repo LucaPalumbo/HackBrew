@@ -38,7 +38,7 @@ case "$action" in
         docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" backend-tools mypy
         docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" frontend npm run typecheck
         ;;
-    test)
+    test|test-recovery)
         hackbrew_tests_project="hackbrew-tests-$$"
         cleanup() {
             test_exit_code=$?
@@ -49,12 +49,17 @@ case "$action" in
         trap cleanup EXIT
         docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml build app tests
         docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
-        docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests pytest "$@"
-        if [ "$#" -eq 0 ]; then
+        if [ "$action" = test ]; then
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests pytest "$@"
+        fi
+        if [ "$action" = test ] && [ "$#" -eq 0 ]; then
             hackbrew_restart_state=$(docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm -T tests python -m tests.check_restart seed)
             docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml restart app
             docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
             printf '%s\n' "$hackbrew_restart_state" | docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm -T tests python -m tests.check_restart verify
+        fi
+        if [ "$action" = test-recovery ] || [ "$#" -eq 0 ]; then
+            "$project_root/scripts/check-recovery" "$hackbrew_tests_project"
         fi
         ;;
     check)
@@ -64,7 +69,7 @@ case "$action" in
         "$0" test
         ;;
     help)
-        printf '%s\n' 'Usage: ./scripts/hackbrew {up|down|build|dev|lint|format|format-check|typecheck|test [pytest arguments]|check}'
+        printf '%s\n' 'Usage: ./scripts/hackbrew {up|down|build|dev|lint|format|format-check|typecheck|test [pytest arguments]|test-recovery|check}'
         ;;
     *)
         printf '%s\n' "Unknown command: $action" >&2

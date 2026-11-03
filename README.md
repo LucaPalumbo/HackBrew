@@ -22,6 +22,8 @@ Per fermare l'applicazione mantenendo le letture:
 
 Un nuovo avvio recupera l'ultima lettura dal volume esistente.
 
+Per un riavvio con conservazione dei dati, usa `./scripts/hackbrew down` seguito da `./scripts/hackbrew up`: avvio, termine, letture e ultima misura diagnostica restano nel volume MongoDB. Anche la ricostruzione dell'immagine con `up` mantiene quel volume. Questi comandi non richiedono di ricreare le fermentazioni.
+
 ## Configurazione
 
 Le impostazioni predefinite funzionano senza un file di configurazione locale. Per cambiarle, copia `.env.example` in `.env` e modifica i valori:
@@ -129,6 +131,14 @@ Il collegamento live ha uno stato separato. Se si interrompe, la pagina conserva
 
 Ogni connessione SSE legge MongoDB all'apertura e controlla le variazioni ogni secondo. Non usa notifiche in memoria come archivio. Gli eventi `reading` contengono lo stesso snapshot di `GET /api/readings/latest`, inclusi fermentazione e relativa lettura, soglia e `server_time` (secondi Unix). Il metadato `fermentation_reading_count`, ricavato dai campioni persistiti dell'attiva, permette di notificare anche una lettura precedente all'ultima: la tabella e i grafici si aggiornano mentre i valori correnti restano corretti. I duplicati non aumentano il conteggio. Il browser usa il riferimento del server e il tempo trascorso per aggiornare lo stato anche senza nuovi eventi. Alla riconnessione viene sempre inviato lo stato persistito corrente, anche con `Last-Event-ID`: non è uno stream dello storico. Se MongoDB diventa irraggiungibile, lo stream invia `unavailable` e si chiude per consentire un nuovo tentativo; le connessioni inattive ricevono commenti di mantenimento.
 
+## Indisponibilità e ripresa
+
+Quando MongoDB non è disponibile, letture, avvio e termine restituiscono HTTP 503 con una spiegazione. Un invio non salvato non viene confermato come riuscito e lo stream non invia una lettura inventata. La dashboard conserva gli eventuali valori già caricati con il loro vero istante di acquisizione; l'età continua a essere valutata senza trasformare un caricamento fallito in una nuova misura. Se non ha ancora ricevuto uno stato valido, indica che il monitoraggio non è disponibile e attende i dati prima di proporre l'avvio di una fermentazione.
+
+Quando il collegamento live riprende, la pagina rilegge anche l'elenco delle concluse e lo storico selezionato, mantenendo fermentazione scelta e finestra delle letture. Un caricamento storico fallito può essere ritentato anche con il pulsante **Riprova storico**. Le operazioni di avvio o termine fallite non vengono eseguite automaticamente alla riconnessione: lo stato salvato rimane visibile e l'operazione può essere riprovata.
+
+Ripristina i servizi con `./scripts/hackbrew up` se erano stati fermati. Dopo il ritorno di MongoDB, una nuova acquisizione valida riprende il monitoraggio sullo stesso volume. Il gateway esterno attuale può eliminare un messaggio dopo un invio fallito: HackBrew non ricostruisce quelle letture e non aggiunge buffer o ritrasmissioni al gateway.
+
 Per osservare il protocollo, in un terminale separato:
 
 ```sh
@@ -152,6 +162,7 @@ Apri **http://localhost:5173** per l'interfaccia con ricaricamento automatico. F
 ./scripts/hackbrew lint
 ./scripts/hackbrew typecheck
 ./scripts/hackbrew test
+./scripts/hackbrew test-recovery
 ```
 
 `format` applica Ruff e Prettier ai file di codice. `lint` usa Ruff ed ESLint. `typecheck` usa mypy e vue-tsc. Ogni strumento viene eseguito in Docker.
@@ -187,6 +198,10 @@ La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verific
 
 Il controllo completo conserva fuori dall'applicazione uno snapshot JSON di fermentazioni, letture e identificatori. Nel solo database isolato prepara anche dati nella forma precedente all'indice univoco, con copie identiche, poi riavvia il container applicativo. Tutte le verifiche osservano le API e il browser: misure originali preservate, duplicati consolidati, nuove consegne idempotenti anche concorrenti, riapertura dei grafici storici e vincolo di avvio concorrente dopo il riavvio.
 
+Il controllo completo esegue inoltre la prova operativa disponibile separatamente con `./scripts/hackbrew test-recovery`. La prova crea una fermentazione conclusa e una attiva, apre monitoraggio e storico nel browser, ferma MongoDB e verifica gli errori HTTP 503, i valori conservati e un termine fallito nell'interfaccia. Ripristina MongoDB, invia una nuova acquisizione e verifica il recupero automatico dello storico; poi ferma l'applicazione e ricrea entrambi i container mantenendo il volume di test. Controlla dati persistiti, riconnessione live, nuova lettura e successivo termine manuale. I messaggi rifiutati durante i guasti non vengono ritrasmessi dal test.
+
+La procedura usa soltanto un progetto `hackbrew-tests-*` e il suo volume isolato. Un coordinatore esterno interrompe e ripristina i servizi mentre il browser rimane aperto nel container dei test; il container applicativo non espone controlli speciali per i test. Non servono credenziali personali, hardware o dati di produzione. `./scripts/hackbrew test <file o argomenti pytest>` esegue soltanto i casi selezionati, mentre `test` senza argomenti e `check` includono anche riavvio e prova di indisponibilità.
+
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
 
 ## Struttura
@@ -197,7 +212,9 @@ src/frontend/         Applicazione Vue, configurazione e lockfile npm
 tests/integration/    Verifiche attraverso l'API HTTP
 tests/browser/        Verifiche della dashboard nel browser
 tests/check_restart.py Verifica operativa di persistenza al riavvio
+tests/check_recovery.py Verifica operativa HTTP/browser delle indisponibilità
 scripts/hackbrew      Comandi di progetto eseguiti tramite Docker
+scripts/check-recovery Coordinamento dei guasti nel solo progetto di test
 docs/                 Specifica, glossario operativo e piano dei ticket
 compose.yaml          Applicazione e strumenti
 compose.dev.yaml      Configurazione di sviluppo

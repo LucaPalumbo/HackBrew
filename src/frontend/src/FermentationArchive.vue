@@ -6,6 +6,7 @@ import { useLatestRequest } from './useLatestRequest'
 const props = defineProps<{
   selectedId: string | null
   activeId: string | null
+  recoveryRevision: number
 }>()
 const emit = defineEmits<{ select: [identifier: string | null] }>()
 const entries = ref<Fermentation[]>([])
@@ -55,9 +56,9 @@ onMounted(() => {
   void load()
 })
 watch(
-  () => props.activeId,
+  () => [props.activeId, props.recoveryRevision] as const,
   () => {
-    void load()
+    void load(offset.value)
   },
 )
 </script>

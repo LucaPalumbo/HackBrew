@@ -9,6 +9,7 @@ const props = defineProps<{
   identifier: string | null
   revision: number
   live: boolean
+  recoveryRevision: number
 }>()
 const fermentation = ref<Fermentation | null>(null)
 const readings = ref<Reading[]>([])
@@ -27,6 +28,7 @@ const temperatures = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 1,
 })
 let loadedId: string | null = null
+let lastRecovery = props.recoveryRevision
 
 async function load(
   before: string | null = cursors.value.at(-1) ?? null,
@@ -75,9 +77,11 @@ function newer() {
     void load(cursors.value[cursors.value.length - 2], 'newer')
 }
 watch(
-  () => [props.identifier, props.revision] as const,
-  ([identifier]) => {
+  () => [props.identifier, props.revision, props.recoveryRevision] as const,
+  ([identifier, , recovery]) => {
     const changed = identifier !== loadedId
+    const recovered = recovery !== lastRecovery
+    lastRecovery = recovery
     if (changed) {
       invalidate()
       loadedId = identifier
@@ -87,7 +91,10 @@ watch(
       cursors.value = [null]
       error.value = ''
     }
-    if (identifier && (changed || (props.live && cursors.value.length === 1)))
+    if (
+      identifier &&
+      (changed || recovered || (props.live && cursors.value.length === 1))
+    )
       void load()
   },
   { immediate: true },

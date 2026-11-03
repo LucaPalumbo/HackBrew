@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+recovery_project=${1:?Pass the isolated test project name}
+case "$recovery_project" in
+    hackbrew-tests-*) ;;
+    *) printf '%s\n' 'Recovery checks require an isolated hackbrew-tests-* project.' >&2; exit 2 ;;
+esac
+recovery_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+recovery_container="$recovery_project-recovery"
+recovery_directory=/tmp/hackbrew-recovery
+
+compose() {
+    docker compose --project-name "$recovery_project" -f "$recovery_root/compose.test.yaml" "$@"
+}
+
+compose run --rm --no-deps -T --name "$recovery_container" \
+    -e "HACKBREW_RECOVERY_DIR=$recovery_directory" tests python -m tests.check_recovery &
+recovery_driver_pid=$!
+cleanup() {
+    recovery_exit_code=$?
+    trap - EXIT
+    docker rm --force "$recovery_container" >/dev/null 2>&1 || true
+    wait "$recovery_driver_pid" 2>/dev/null || true
+    exit "$recovery_exit_code"
+}
+trap cleanup EXIT
+
+wait_phase() {
+    recovery_attempt=0
+    until docker exec "$recovery_container" test -f "$recovery_directory/$1" 2>/dev/null; do
+        if ! kill -0 "$recovery_driver_pid" 2>/dev/null; then
+            wait "$recovery_driver_pid"
+            printf '%s\n' "Recovery driver stopped before phase $1." >&2
+            return 1
+        fi
+        recovery_attempt=$((recovery_attempt + 1))
+        if [ "$recovery_attempt" -ge 120 ]; then
+            printf '%s\n' "Timed out waiting for recovery phase $1." >&2
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+signal_phase() {
+    docker exec "$recovery_container" touch "$recovery_directory/$1"
+}
+
+wait_phase stop-mongo
+compose stop mongo
+signal_phase mongo-down
+wait_phase start-mongo
+compose up --detach --wait mongo
+signal_phase mongo-up
+wait_phase stop-app
+compose stop app
+signal_phase app-down
+wait_phase recreate-services
+compose up --force-recreate --detach --wait app mongo
+signal_phase services-up
+wait "$recovery_driver_pid"

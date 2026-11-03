@@ -36,6 +36,7 @@ const reading = computed(() =>
   fermentation.value ? fermentationReading.value : diagnosticReading.value,
 )
 const isLoading = ref(false)
+const hasSnapshot = ref(false)
 const error = ref('')
 const connection = ref<'connecting' | 'live' | 'reconnecting'>('connecting')
 const connectionStatus = computed(() => {
@@ -47,12 +48,14 @@ const connectionStatus = computed(() => {
 let events: EventSource | undefined
 let streamRevision = 0
 const historyRevision = ref(0)
+const recoveryRevision = ref(0)
 let disposed = false
 let freshnessTimer: ReturnType<typeof setInterval> | undefined
 const freshnessSeconds = ref<number | null>(null)
 const serverReference = ref<{ time: number; observedAt: number } | null>(null)
 const clock = ref(performance.now())
 const dataStatus = computed(() => {
+  if (!hasSnapshot.value) return 'Stato dei dati non disponibile'
   if (!reading.value)
     return fermentation.value ? 'In attesa di letture' : 'Nessuna lettura'
   if (!serverReference.value || freshnessSeconds.value === null)
@@ -95,6 +98,7 @@ async function loadLatest() {
 }
 
 function applySnapshot(snapshot: Snapshot) {
+  hasSnapshot.value = true
   historyRevision.value += 1
   diagnosticReading.value = snapshot.reading
   fermentation.value = snapshot.fermentation
@@ -119,6 +123,7 @@ function connectLive() {
     const snapshot: Snapshot = JSON.parse(event.data)
     streamRevision += 1
     applySnapshot(snapshot)
+    if (connection.value !== 'live') recoveryRevision.value += 1
     error.value = ''
     connection.value = 'live'
   })
@@ -165,9 +170,11 @@ onUnmounted(() => {
       <span class="mode">{{
         selectedId
           ? 'Storico fermentazioni'
-          : fermentation
-            ? 'Fermentazione in corso'
-            : 'Modalità diagnostica'
+          : !hasSnapshot
+            ? 'Monitoraggio non disponibile'
+            : fermentation
+              ? 'Fermentazione in corso'
+              : 'Modalità diagnostica'
       }}</span>
     </header>
 
@@ -202,12 +209,13 @@ onUnmounted(() => {
       </div>
 
       <FermentationArchive
+        :recovery-revision="recoveryRevision"
         :selected-id="selectedId"
         :active-id="fermentation?.id ?? null"
         @select="selectFermentation"
       />
       <FermentationControls
-        v-if="!selectedId"
+        v-if="!selectedId && hasSnapshot"
         :fermentation="fermentation"
         :loading="isLoading"
         @changed="loadLatest"
@@ -235,7 +243,7 @@ onUnmounted(() => {
         </p>
 
         <section
-          v-else-if="!reading && !error"
+          v-else-if="hasSnapshot && !reading && !error"
           class="empty"
           aria-labelledby="empty-heading"
         >
@@ -345,6 +353,7 @@ onUnmounted(() => {
         </section>
       </template>
       <FermentationHistory
+        :recovery-revision="recoveryRevision"
         :identifier="selectedId ?? fermentation?.id ?? null"
         :revision="historyRevision"
         :live="!selectedId"
@@ -353,9 +362,11 @@ onUnmounted(() => {
         <span>{{
           selectedId
             ? 'Consultazione storico'
-            : fermentation
-              ? `Fermentazione attiva: ${fermentation.name}`
-              : 'Nessuna fermentazione attiva'
+            : !hasSnapshot
+              ? 'Stato della fermentazione non disponibile'
+              : fermentation
+                ? `Fermentazione attiva: ${fermentation.name}`
+                : 'Nessuna fermentazione attiva'
         }}</span>
         <span>{{
           selectedId
