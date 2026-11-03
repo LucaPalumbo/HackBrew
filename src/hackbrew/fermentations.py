@@ -26,7 +26,6 @@ def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
         unique=True,
         partialFilterExpression={"status": "active"},
     )
-    db.fermentation_readings.create_index([("fermentation_id", 1), ("timestamp", 1), ("_id", 1)])
 
 
 def monitoring_time() -> float:
@@ -150,13 +149,19 @@ def reading_filter(document: dict[str, Any]) -> dict[str, Any]:
 def active_snapshot(db: Database[dict[str, Any]]) -> dict[str, object]:
     document = db.fermentations.find_one({"status": "active"})
     if document is None:
-        return {"fermentation": None, "fermentation_reading": None}
+        return {"fermentation": None, "fermentation_reading": None, "fermentation_reading_count": 0}
     reading = db.fermentation_readings.find_one(
         reading_filter(document),
         {"_id": False, "fermentation_id": False},
-        sort=[("timestamp", -1)],
+        sort=[("timestamp", -1), ("_id", -1)],
     )
-    return {"fermentation": public_fermentation(document), "fermentation_reading": reading}
+    return {
+        "fermentation": public_fermentation(document),
+        "fermentation_reading": reading,
+        "fermentation_reading_count": db.fermentation_readings.count_documents(
+            reading_filter(document)
+        ),
+    }
 
 
 @router.get("/{identifier}/readings")
@@ -192,14 +197,3 @@ def get_readings(
     for reading in page:
         reading.pop("_id")
     return {"readings": list(reversed(page)), "next_before": next_before}
-
-
-def record_reading(db: Database[dict[str, Any]], reading: dict[str, Any]) -> None:
-    document = db.fermentations.find_one(
-        {
-            "started_at": {"$lte": reading["timestamp"]},
-            "$or": [{"ended_at": None}, {"ended_at": {"$gt": reading["timestamp"]}}],
-        }
-    )
-    if document:
-        db.fermentation_readings.insert_one({**reading, "fermentation_id": document["_id"]})

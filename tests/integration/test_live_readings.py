@@ -15,6 +15,34 @@ def next_snapshot(lines: Iterator[str]) -> dict[str, Any]:
     raise AssertionError("The event stream ended without a snapshot")
 
 
+def test_late_sample_notifies_history_without_replacing_latest_values(api: httpx.Client) -> None:
+    fermentation = api.post("/api/fermentations", json={"name": "IPA fuori ordine"}).json()[
+        "fermentation"
+    ]
+    start = datetime.fromisoformat(fermentation["started_at"]).timestamp()
+    assert (
+        api.post(
+            "/telemetry", json=gateway_lettura(timestamp=start + 0.000124, specific_gravity=1040)
+        ).status_code
+        == 200
+    )
+    with api.stream("GET", "/api/readings/events") as response:
+        lines = response.iter_lines()
+        original = next_snapshot(lines)
+        assert original["fermentation_reading_count"] == 1
+        assert (
+            api.post(
+                "/telemetry",
+                json=gateway_lettura(timestamp=start + 0.000123, specific_gravity=1050),
+            ).status_code
+            == 200
+        )
+        updated = next_snapshot(lines)
+        assert updated["fermentation_reading_count"] == 2
+        assert updated["reading"] == original["reading"]
+        assert updated["fermentation_reading"] == original["fermentation_reading"]
+
+
 def test_live_stream_starts_with_persisted_state_and_delivers_new_letture(
     api: httpx.Client,
 ) -> None:

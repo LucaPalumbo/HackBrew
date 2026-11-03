@@ -17,8 +17,9 @@ from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from starlette.concurrency import run_in_threadpool
 
-from hackbrew.fermentations import active_snapshot, initialize_fermentations, record_reading
+from hackbrew.fermentations import active_snapshot, initialize_fermentations
 from hackbrew.fermentations import router as fermentations_router
+from hackbrew.history import initialize_history, record_reading
 from hackbrew.models import GatewayReading
 from hackbrew.storage import database
 
@@ -37,6 +38,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     ) as client:
         application.state.database = client[os.environ.get("MONGODB_DATABASE", "hackbrew")]
         initialize_fermentations(application.state.database)
+        initialize_history(application.state.database)
         yield
 
 
@@ -96,6 +98,7 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
             snapshot["reading"],
             snapshot["fermentation"],
             snapshot["fermentation_reading"],
+            snapshot["fermentation_reading_count"],
         )
         if persisted_state != previous:
             yield ServerSentEvent(

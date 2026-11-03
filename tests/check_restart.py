@@ -4,13 +4,14 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
 import httpx
 from playwright.sync_api import expect, sync_playwright
 
-from tests.database import reset_test_database
+from tests.database import reset_test_database, seed_legacy_duplicates
 from tests.fermentations import assert_single_concurrent_start
 from tests.payloads import gateway_lettura
 
@@ -41,7 +42,7 @@ def seed(api: httpx.Client) -> dict[str, Any]:
     response.raise_for_status()
     concluded = response.json()["fermentation"]
     active = start_with_reading(api, "Persistenza attiva", 1050.125, 1.050125)
-    return {
+    expected = {
         "concluded": concluded,
         "active": active,
         "reading": api.get("/api/readings/latest").json()["reading"],
@@ -52,9 +53,19 @@ def seed(api: httpx.Client) -> dict[str, Any]:
             "readings"
         ],
     }
+    seed_legacy_duplicates()
+    return expected
 
 
 def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
+    for status, gravity in (("concluded", 1040.125), ("active", 1050.125)):
+        reading = expected[f"{status}_readings"][0]
+        payload = gateway_lettura(timestamp=reading["timestamp"], specific_gravity=gravity)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            responses = list(
+                pool.map(lambda body: api.post("/telemetry", json=body), [payload] * 12)
+            )
+        assert all(response.status_code == 200 for response in responses)
     for status in ("concluded", "active"):
         identifier = expected[status]["id"]
         assert (
@@ -66,6 +77,18 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
     assert api.get("/api/readings/latest").json()["reading"] == expected["reading"]
     assert api.get("/api/fermentations/active").json()["fermentation"] == expected["active"]
     assert api.post("/api/fermentations", json={"name": "Avvio bloccato"}).status_code == 409
+
+    timestamp = expected["reading"]["timestamp"] + 0.000001
+    payload = gateway_lettura(timestamp=timestamp, specific_gravity=1030.125)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        responses = list(pool.map(lambda _: api.post("/telemetry", json=payload), range(12)))
+    assert all(response.status_code == 200 for response in responses)
+    active_history = api.get(f"/api/fermentations/{expected['active']['id']}/readings").json()[
+        "readings"
+    ]
+    assert len(active_history) == 2
+    assert active_history[-1]["timestamp"] == timestamp
+    assert api.get("/api/readings/latest").json()["reading"]["specific_gravity"] == 1.030125
 
     concluded = api.get("/api/fermentations", params={"q": "Persistenza conclusa"}).json()[
         "fermentations"
