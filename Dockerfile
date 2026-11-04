@@ -29,6 +29,9 @@ FROM tools AS browser-deps
 RUN python -m playwright install --with-deps --only-shell chromium
 
 FROM browser-deps AS tests
+COPY --from=gateway /main.py /ble_worker.py /config.py /http_worker.py /registry.py /replay.py /telemetryData.py /requirements.lock /opt/rapt-gateway/
+COPY --from=gateway /fixtures /opt/rapt-gateway/fixtures/
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r /opt/rapt-gateway/requirements.lock
 COPY tests/ tests/
 CMD ["pytest"]
 

@@ -47,7 +47,11 @@ case "$action" in
             exit "$test_exit_code"
         }
         trap cleanup EXIT
-        docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml build app tests
+        if [ -n "${HACKBREW_GATEWAY_TOKEN:-}" ]; then
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml -f compose.bridge-auth.yaml build app tests
+        else
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml build app tests
+        fi
         docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
         if [ "$action" = test ]; then
             docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests pytest "$@"

@@ -1,0 +1,11 @@
+# Optional build-only access to the private gateway repository.
+services:
+  tests:
+    build:
+      secrets:
+        - source: gateway-git-token
+          target: GIT_AUTH_TOKEN.github.com
+
+secrets:
+  gateway-git-token:
+    environment: HACKBREW_GATEWAY_TOKEN

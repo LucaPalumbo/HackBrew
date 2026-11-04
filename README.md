@@ -49,7 +49,11 @@ Ogni pillola mostra densità SG, temperatura °C, batteria %, velocità della de
 | `GET /api/pills` | Elenca `pills`, con identificatore, nome, MAC normalizzato, `available` e `active_fermentation_id`. |
 | `GET /api/readings/latest?pill_id=<id>` | Restituisce l'ultima lettura della pillola richiesta; HTTP 404 per identità sconosciuta. |
 
-Il bridge corrente deve aggiungere `pill_mac` a ogni invio. L'adeguamento del bridge reale per più pillole e sincronizzazione automatica del registro è il [ticket #11](https://github.com/LucaPalumbo/HackBrew/issues/11); questo incremento può essere provato con messaggi HTTP identificati. Non attribuire un vecchio messaggio privo di MAC a una pillola scelta arbitrariamente.
+Il [bridge reale aggiornato](https://github.com/LucaPalumbo/RaptPillGateway-ble-http) acquisisce tutte le pillole dal registro HTTP: inserire nome e MAC in questa pagina è sufficiente, senza un secondo elenco manuale sul gateway. Recupera le aggiunte periodicamente (30 secondi predefiniti) e include `pill_mac` in ogni invio. La [guida di integrazione](docs/integrations/rapt-gateway.md) descrive configurazione, protocollo, prove senza hardware e verifica con pillole vere.
+
+| Operazione bridge | Risultato |
+| --- | --- |
+| `GET /api/bridge/pills` | Snapshot con `revision` opaca e `pills`: identità stabile, nome e MAC normalizzato di ogni registrazione. Non rinnova il contatto delle pillole. |
 
 ## Configurazione
 
@@ -232,9 +236,14 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/browser/test_pills_dashboard.py
 ./scripts/hackbrew test tests/integration/test_parallel_fermentations.py
 ./scripts/hackbrew test tests/browser/test_parallel_dashboard.py
+./scripts/hackbrew test tests/integration/test_bridge.py tests/browser/test_bridge_dashboard.py
 ```
 
 La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. I test di consegna coprono invii ripetuti e concorrenti, valori distinti allo stesso timestamp, letture fuori ordine e confini tra due fermentazioni.
+
+Le prove del bridge avviano il vero eseguibile del gateway con input BLE deterministici, attraverso lo stesso ricevitore e parser usato con l'adattatore. Verificano HTTP reale, sincronizzazione automatica, due pillole visibili nel browser, duplicati separati, accelerazioni con segno, qualità della velocità e consegne fallite senza retry. Il gateway non diventa un servizio applicativo obbligatorio.
+
+**La repository del gateway è privata.** Prima di `test`, `test-recovery` o `check`, scegli una delle modalità: usa una checkout a cui hai accesso con `export HACKBREW_GATEWAY_SOURCE=/percorso/assoluto/RaptPillGateway-ble-http` (per riprodurre la consegna, commit `de4cd6395b67b97f154fe0ed6f5cd8fa82a35e90`), oppure esporta `HACKBREW_GATEWAY_TOKEN` con una credenziale GitHub autorizzata alla lettura della repository. Con GitHub CLI già autenticata puoi usare `export HACKBREW_GATEWAY_TOKEN="$(gh auth token)"`. Questa seconda modalità scarica il commit fissato in Compose e passa il token solo come secret di build, senza salvarlo nell'immagine o nella configurazione dei servizi. Non inserire credenziali negli URL. `up`, `dev`, build applicativa, lint e typecheck non richiedono il gateway. La [guida](docs/integrations/rapt-gateway.md) dettaglia entrambe le opzioni.
 
 Il controllo completo conserva fuori dall'applicazione snapshot JSON e riavvia realmente l'applicazione sullo stesso volume di test in due scenari. Il primo prepara il vincolo globale della #9 e verifica la sua sostituzione con quello per pillola, senza perdere registrazioni, ciclo o letture. Il secondo salva due fermentazioni attive e una conclusa, verificando dopo il riavvio assegnazioni, misure, deduplicazione concorrente, storico browser e vincoli di riuso per pillola. Tutte le asserzioni osservano API e browser; la preparazione degli indici precedenti è confinata al solo database di test.
 
@@ -242,7 +251,7 @@ Il controllo completo esegue inoltre la prova operativa disponibile separatament
 
 La procedura usa soltanto un progetto `hackbrew-tests-*` e il suo volume isolato. Un coordinatore esterno interrompe e ripristina i servizi mentre il browser rimane aperto nel container dei test; il container applicativo non espone controlli speciali per i test. Non servono credenziali personali, hardware o dati di produzione. `./scripts/hackbrew test <file o argomenti pytest>` esegue soltanto i casi selezionati, mentre `test` senza argomenti e `check` includono anche riavvio e prova di indisponibilità.
 
-Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
+Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, un gateway fisico o l'accesso al volume dell'applicazione. Le prove usano il codice reale del gateway privato: la modalità checkout locale non richiede credenziali durante il build.
 
 Le prove browser salvano schermate desktop/telefono in `artifacts/`, esclusa da Git. Le immagini `pillole-1440.png` e `pillole-390.png` mostrano il registro; `fermentazioni-parallele-1440.png` e `fermentazioni-parallele-390.png` mostrano card e dettaglio di cicli indipendenti.
 

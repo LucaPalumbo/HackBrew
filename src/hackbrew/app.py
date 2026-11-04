@@ -17,6 +17,7 @@ from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from starlette.concurrency import run_in_threadpool
 
+from hackbrew.bridge import router as bridge_router
 from hackbrew.fermentations import active_snapshot, initialize_fermentations
 from hackbrew.fermentations import router as fermentations_router
 from hackbrew.history import initialize_history, record_reading
@@ -48,6 +49,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="HackBrew", lifespan=lifespan)
 app.include_router(fermentations_router)
 app.include_router(pills_router)
+app.include_router(bridge_router)
 
 
 @app.exception_handler(RequestValidationError)

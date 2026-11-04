@@ -98,6 +98,7 @@ def seed(api: httpx.Client) -> dict[str, Any]:
     ).json()["reading"]
     expected = {
         "pills": api.get("/api/pills").json()["pills"],
+        "bridge_registry": api.get("/api/bridge/pills").json(),
         "other_pill": other,
         "other_active": other_active,
         "other_history": api.get(f"/api/fermentations/{other_active['id']}/readings").json()[
@@ -119,6 +120,7 @@ def seed(api: httpx.Client) -> dict[str, Any]:
 
 def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
     assert api.get("/api/pills").json()["pills"] == expected["pills"]
+    assert api.get("/api/bridge/pills").json() == expected["bridge_registry"]
     assert (
         api.get("/api/readings/latest", params={"pill_id": expected["other_pill"]["id"]}).json()[
             "reading"

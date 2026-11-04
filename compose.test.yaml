@@ -37,6 +37,8 @@ services:
     build:
       context: .
       target: tests
+      additional_contexts:
+        gateway: ${HACKBREW_GATEWAY_SOURCE:-https://github.com/LucaPalumbo/RaptPillGateway-ble-http.git#de4cd6395b67b97f154fe0ed6f5cd8fa82a35e90}
     environment:
       HACKBREW_SCREENSHOT_DIR: /artifacts
       HACKBREW_BASE_URL: http://hackbrew-test:8000
