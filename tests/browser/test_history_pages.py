@@ -3,11 +3,13 @@ from datetime import datetime
 import httpx
 from playwright.sync_api import Page, expect
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 def test_phone_can_page_through_all_original_letture(page: Page, api: httpx.Client) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA lunga"}).json()["fermentation"]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA lunga")
+    ).json()["fermentation"]
     base = datetime.fromisoformat(fermentation["started_at"]).timestamp() + 0.000123
     for number in range(205):
         gravity = 1060 if number == 0 else 1040 if number == 204 else 1050.125
@@ -40,9 +42,9 @@ def test_phone_can_page_through_all_original_letture(page: Page, api: httpx.Clie
 def test_empty_concluded_history_and_failed_load_do_not_show_diagnostic_values(
     page: Page, api: httpx.Client
 ) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "Senza letture"}).json()[
-        "fermentation"
-    ]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "Senza letture")
+    ).json()["fermentation"]
     assert api.post(f"/api/fermentations/{fermentation['id']}/end").status_code == 200
     assert api.post("/telemetry", json=gateway_lettura()).status_code == 200
     page.goto(str(api.base_url))

@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import httpx
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 def next_snapshot(lines: Iterator[str]) -> dict[str, Any]:
@@ -16,9 +16,9 @@ def next_snapshot(lines: Iterator[str]) -> dict[str, Any]:
 
 
 def test_late_sample_notifies_history_without_replacing_latest_values(api: httpx.Client) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA fuori ordine"}).json()[
-        "fermentation"
-    ]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA fuori ordine")
+    ).json()["fermentation"]
     start = datetime.fromisoformat(fermentation["started_at"]).timestamp()
     assert (
         api.post(
@@ -100,7 +100,9 @@ def test_live_snapshot_tracks_fermentazione_and_its_own_latest_lettura(api: http
         initial = next_snapshot(lines)
         assert initial["fermentation"] is None
         assert initial["fermentation_reading"] is None
-        started = api.post("/api/fermentations", json={"name": "IPA live"}).json()["fermentation"]
+        started = api.post("/api/fermentations", json=fermentation_payload(api, "IPA live")).json()[
+            "fermentation"
+        ]
         snapshot = next_snapshot(lines)
         assert snapshot["fermentation"]["id"] == started["id"]
         assert snapshot["fermentation"]["name"] == "IPA live"

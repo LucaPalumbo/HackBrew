@@ -3,18 +3,29 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import FermentationControls from './FermentationControls.vue'
 import FermentationArchive from './FermentationArchive.vue'
 import FermentationHistory from './FermentationHistory.vue'
+import PillRegistry from './PillRegistry.vue'
 import type { Fermentation } from './fermentations'
-import type { Reading } from './readings'
+import type { PillSnapshot, Reading } from './readings'
 
 type Snapshot = {
   reading: Reading | null
+  pill_id: string | null
+  pills: PillSnapshot[]
   freshness_seconds: number
   server_time: number
   fermentation: Fermentation | null
   fermentation_reading: Reading | null
 }
 
-const diagnosticReading = ref<Reading | null>(null)
+const devicesPage =
+  new URLSearchParams(window.location.search).get('page') === 'devices'
+const pills = ref<PillSnapshot[]>([])
+const diagnosticPillId = ref('')
+const diagnosticReading = computed(
+  () =>
+    pills.value.find((pill) => pill.id === diagnosticPillId.value)?.reading ??
+    null,
+)
 const fermentation = ref<Fermentation | null>(null)
 const fermentationReading = ref<Reading | null>(null)
 const selectedId = ref(
@@ -100,7 +111,9 @@ async function loadLatest() {
 function applySnapshot(snapshot: Snapshot) {
   hasSnapshot.value = true
   historyRevision.value += 1
-  diagnosticReading.value = snapshot.reading
+  pills.value = snapshot.pills
+  if (!pills.value.some((pill) => pill.id === diagnosticPillId.value))
+    diagnosticPillId.value = snapshot.pill_id ?? ''
   fermentation.value = snapshot.fermentation
   fermentationReading.value = snapshot.fermentation_reading
   freshnessSeconds.value = snapshot.freshness_seconds
@@ -167,6 +180,16 @@ onUnmounted(() => {
         <span class="brand-mark" aria-hidden="true">hb</span>
         <span>Hack<span class="brand-accent">Brew</span></span>
       </a>
+      <nav class="main-navigation" aria-label="Navigazione principale">
+        <a href="/" :aria-current="!devicesPage ? 'page' : undefined"
+          >Monitoraggio</a
+        >
+        <a
+          href="/?page=devices"
+          :aria-current="devicesPage ? 'page' : undefined"
+          >Dispositivi</a
+        >
+      </nav>
       <span class="mode">{{
         selectedId
           ? 'Storico fermentazioni'
@@ -178,7 +201,16 @@ onUnmounted(() => {
       }}</span>
     </header>
 
-    <main>
+    <main v-if="devicesPage">
+      <PillRegistry
+        :pills="pills"
+        :loading="isLoading"
+        :error="error"
+        @changed="loadLatest"
+      />
+      <p class="connection-status" role="status">{{ connectionStatus }}</p>
+    </main>
+    <main v-else>
       <div class="intro">
         <div>
           <p class="eyebrow">Il tuo fermentatore</p>
@@ -218,6 +250,7 @@ onUnmounted(() => {
         v-if="!selectedId && hasSnapshot"
         :fermentation="fermentation"
         :loading="isLoading"
+        :pills="pills"
         @changed="loadLatest"
       />
       <p v-if="error && !selectedId" class="error" role="alert">{{ error }}</p>
@@ -230,6 +263,14 @@ onUnmounted(() => {
         {{ connectionStatus }}
       </p>
       <template v-if="!selectedId">
+        <div v-if="!fermentation && pills.length" class="diagnostic-selection">
+          <label for="diagnostic-pill">Pillola diagnostica</label>
+          <select id="diagnostic-pill" v-model="diagnosticPillId">
+            <option v-for="pill in pills" :key="pill.id" :value="pill.id">
+              {{ pill.name }} · {{ pill.mac }}
+            </option>
+          </select>
+        </div>
         <p
           class="data-status"
           :class="{ stale: dataStatus === 'Dati non aggiornati' }"

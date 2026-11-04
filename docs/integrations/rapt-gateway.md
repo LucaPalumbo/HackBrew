@@ -2,7 +2,7 @@
 
 Il gateway esistente è la sorgente delle letture per HackBrew. Questo documento descrive il codice esaminato, non un contratto già verificato con traffico della pillola reale.
 
-Il gateway è un progetto esterno: l'utente ha escluso esplicitamente la sua dockerizzazione e le modifiche al suo repository dal lavoro corrente. I servizi Docker di HackBrew comprenderanno frontend, backend e database; l'integrazione con il gateway avverrà tramite HTTP.
+Il gateway è un progetto esterno. Nel perimetro MVP l'utente aveva escluso la sua dockerizzazione e le modifiche al suo repository. La successiva [specifica su dispositivi e regolazione](../specs/hackbrew-devices-and-control.md) include ora le modifiche al gateway per più pillole, sincronizzazione del registro e identificazione della sorgente; la sua dockerizzazione resta esclusa. I servizi Docker di HackBrew comprendono frontend, backend e database; l'integrazione con il gateway avviene tramite HTTP. I fatti e le decisioni MVP riportati sotto descrivono il contratto precedente all'evoluzione.
 
 ## Fonti
 
@@ -14,6 +14,12 @@ Il gateway è un progetto esterno: l'utente ha escluso esplicitamente la sua doc
 - [Parser originale rapt-ble](https://github.com/sairon/rapt-ble/blob/1473743be0d6dc9c151aae64588e7feffe7147c6/src/rapt_ble/parser.py) e [fixture di protocollo](https://github.com/sairon/rapt-ble/blob/1473743be0d6dc9c151aae64588e7feffe7147c6/tests/test_parser.py), usati per interpretare scala SG, batteria e flag di validità.
 
 ## Trasporto e campi
+
+### Estensione HackBrew del ricevitore
+
+Dal ticket [#9](https://github.com/LucaPalumbo/HackBrew/issues/9), HackBrew richiede anche `pill_mac`, il MAC Bluetooth di una pillola già registrata nella pagina Dispositivi. I messaggi senza identità sono rifiutati; il server non sceglie una sorgente al loro posto. Conserva tutti i campi della tabella sotto e distingue ultima lettura e ultima comunicazione per pillola. La modifica del bridge reale per aggiungere il MAC, leggere più pillole e sincronizzare il registro è il [ticket #11](https://github.com/LucaPalumbo/HackBrew/issues/11), ancora separato. Il [README](../../README.md) descrive registrazione, formato completo e prova HTTP di questo incremento.
+
+### Contratto osservato nel bridge MVP
 
 Il gateway seleziona la pillola tramite MAC Bluetooth e invia una lettura per richiesta HTTP POST con corpo JSON.
 

@@ -3,15 +3,15 @@ from datetime import UTC, datetime
 import httpx
 from playwright.sync_api import Page, expect
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 def test_selected_history_recovers_automatically_after_a_failed_load_and_reconnection(
     page: Page, api: httpx.Client
 ) -> None:
-    first = api.post("/api/fermentations", json={"name": "Storico da recuperare"}).json()[
-        "fermentation"
-    ]
+    first = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "Storico da recuperare")
+    ).json()["fermentation"]
     assert (
         api.post(
             "/telemetry",
@@ -20,7 +20,9 @@ def test_selected_history_recovers_automatically_after_a_failed_load_and_reconne
         == 200
     )
     assert api.post(f"/api/fermentations/{first['id']}/end").status_code == 200
-    assert api.post("/api/fermentations", json={"name": "Attiva"}).status_code == 201
+    assert (
+        api.post("/api/fermentations", json=fermentation_payload(api, "Attiva")).status_code == 201
+    )
     page.goto(str(api.base_url))
     page.route("**/api/fermentations/*/readings?*", lambda route: route.abort("connectionfailed"))
     page.get_by_role("button", name="Apri Storico da recuperare").click()
@@ -45,7 +47,12 @@ def test_selected_history_recovers_automatically_after_a_failed_load_and_reconne
 def test_failed_initial_snapshot_does_not_invent_an_empty_fermentazione_state(
     page: Page, api: httpx.Client
 ) -> None:
-    assert api.post("/api/fermentations", json={"name": "IPA già avviata"}).status_code == 201
+    assert (
+        api.post(
+            "/api/fermentations", json=fermentation_payload(api, "IPA già avviata")
+        ).status_code
+        == 201
+    )
     assert (
         api.post(
             "/telemetry",

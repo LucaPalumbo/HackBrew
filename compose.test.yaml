@@ -38,9 +38,12 @@ services:
       context: .
       target: tests
     environment:
+      HACKBREW_SCREENSHOT_DIR: /artifacts
       HACKBREW_BASE_URL: http://hackbrew-test:8000
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DATABASE: hackbrew_test
+    volumes:
+      - ./artifacts:/artifacts:z
     depends_on:
       app:
         condition: service_healthy

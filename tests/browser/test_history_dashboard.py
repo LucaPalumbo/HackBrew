@@ -4,14 +4,14 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 @pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
 def test_active_charts_and_table_update_with_real_letture(
     page: Page, api: httpx.Client, width: int, height: int
 ) -> None:
-    api.post("/api/fermentations", json={"name": "IPA live"}).raise_for_status()
+    api.post("/api/fermentations", json=fermentation_payload(api, "IPA live")).raise_for_status()
     page.set_viewport_size({"width": width, "height": height})
     page.goto(str(api.base_url))
     expect(
@@ -57,7 +57,9 @@ def test_selected_concluded_history_stays_separate_from_new_live_data_and_surviv
         ("Prima IPA", 1060, 18, 80),
         ("Seconda stout", 1040, 20, 60),
     ]:
-        fermentation = api.post("/api/fermentations", json={"name": name}).json()["fermentation"]
+        fermentation = api.post("/api/fermentations", json=fermentation_payload(api, name)).json()[
+            "fermentation"
+        ]
         assert (
             api.post(
                 "/telemetry",
@@ -71,7 +73,10 @@ def test_selected_concluded_history_stays_separate_from_new_live_data_and_surviv
             == 200
         )
         assert api.post(f"/api/fermentations/{fermentation['id']}/end").status_code == 200
-    assert api.post("/api/fermentations", json={"name": "Terza attiva"}).status_code == 201
+    assert (
+        api.post("/api/fermentations", json=fermentation_payload(api, "Terza attiva")).status_code
+        == 201
+    )
     assert (
         api.post(
             "/telemetry",

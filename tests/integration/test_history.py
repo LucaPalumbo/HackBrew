@@ -3,17 +3,24 @@ from datetime import datetime
 import httpx
 import pytest
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 def test_concluded_fermentazioni_can_be_found_by_name_without_listing_the_active_one(
     api: httpx.Client,
 ) -> None:
-    first = api.post("/api/fermentations", json={"name": "Prima IPA"}).json()["fermentation"]
+    first = api.post("/api/fermentations", json=fermentation_payload(api, "Prima IPA")).json()[
+        "fermentation"
+    ]
     assert api.post(f"/api/fermentations/{first['id']}/end").status_code == 200
-    second = api.post("/api/fermentations", json={"name": "Seconda stout"}).json()["fermentation"]
+    second = api.post("/api/fermentations", json=fermentation_payload(api, "Seconda stout")).json()[
+        "fermentation"
+    ]
     assert api.post(f"/api/fermentations/{second['id']}/end").status_code == 200
-    assert api.post("/api/fermentations", json={"name": "Terza attiva"}).status_code == 201
+    assert (
+        api.post("/api/fermentations", json=fermentation_payload(api, "Terza attiva")).status_code
+        == 201
+    )
 
     response = api.get("/api/fermentations", params={"limit": 1})
     assert response.status_code == 200
@@ -29,9 +36,9 @@ def test_concluded_fermentazioni_can_be_found_by_name_without_listing_the_active
 
 
 def test_history_pages_keep_original_samples_in_acquisition_order(api: httpx.Client) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA paginata"}).json()[
-        "fermentation"
-    ]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA paginata")
+    ).json()["fermentation"]
     base = datetime.fromisoformat(fermentation["started_at"]).timestamp() + 0.000123
     for offset, gravity in [(3, 1040), (1, 1050), (2, 1045), (2, 1044), (0, 1060)]:
         assert (
@@ -57,7 +64,9 @@ def test_history_pages_keep_original_samples_in_acquisition_order(api: httpx.Cli
 def test_history_default_window_is_bounded_without_discarding_older_samples(
     api: httpx.Client,
 ) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA lunga"}).json()["fermentation"]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA lunga")
+    ).json()["fermentation"]
     base = datetime.fromisoformat(fermentation["started_at"]).timestamp() + 0.000123
     for number in range(205):
         assert (
@@ -88,7 +97,9 @@ def test_history_default_window_is_bounded_without_discarding_older_samples(
     ],
 )
 def test_invalid_history_page_is_rejected(api: httpx.Client, params: dict[str, str | int]) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA"}).json()["fermentation"]
+    fermentation = api.post("/api/fermentations", json=fermentation_payload(api, "IPA")).json()[
+        "fermentation"
+    ]
     assert (
         api.get(f"/api/fermentations/{fermentation['id']}/readings", params=params).status_code
         == 422

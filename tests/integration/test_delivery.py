@@ -4,13 +4,13 @@ from datetime import datetime
 import httpx
 import pytest
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 def test_identical_delivery_keeps_one_original_lettura(api: httpx.Client) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA affidabile"}).json()[
-        "fermentation"
-    ]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA affidabile")
+    ).json()["fermentation"]
     timestamp = datetime.fromisoformat(fermentation["started_at"]).timestamp() + 0.000123
     payload = gateway_lettura(timestamp=timestamp)
     first = api.post("/telemetry", json=payload)
@@ -27,9 +27,9 @@ def test_identical_delivery_keeps_one_original_lettura(api: httpx.Client) -> Non
 
 
 def test_concurrent_duplicate_deliveries_persist_one_sample(api: httpx.Client) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA concorrente"}).json()[
-        "fermentation"
-    ]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA concorrente")
+    ).json()["fermentation"]
     timestamp = datetime.fromisoformat(fermentation["started_at"]).timestamp() + 0.000123
     payload = gateway_lettura(timestamp=timestamp)
     with ThreadPoolExecutor(max_workers=12) as pool:
@@ -48,14 +48,19 @@ def test_concurrent_duplicate_deliveries_persist_one_sample(api: httpx.Client) -
         ("specific_gravity", 1050.126, 1.050126),
         ("temperature", 19.6875001, 19.6875001),
         ("battery", 63.2734381, 63.2734381),
+        ("gravity_velocity", -2.5, -2.5),
+        ("accel_x", -0.5, -0.5),
+        ("accel_y", 0.25, 0.25),
+        ("accel_z", 0.75, 0.75),
+        ("valid", True, True),
     ],
 )
 def test_distinct_measurements_at_same_acquisition_are_not_merged(
-    api: httpx.Client, field: str, value: float, expected: float
+    api: httpx.Client, field: str, value: object, expected: object
 ) -> None:
-    fermentation = api.post("/api/fermentations", json={"name": "IPA precisa"}).json()[
-        "fermentation"
-    ]
+    fermentation = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA precisa")
+    ).json()["fermentation"]
     timestamp = datetime.fromisoformat(fermentation["started_at"]).timestamp() + 0.000123
     assert api.post("/telemetry", json=gateway_lettura(timestamp=timestamp)).status_code == 200
     changed = gateway_lettura(timestamp=timestamp, **{field: value})
@@ -73,11 +78,15 @@ def test_distinct_measurements_at_same_acquisition_are_not_merged(
 def test_delayed_letture_and_boundaries_keep_successive_fermentazioni_separate(
     api: httpx.Client,
 ) -> None:
-    first = api.post("/api/fermentations", json={"name": "Prima IPA"}).json()["fermentation"]
+    first = api.post("/api/fermentations", json=fermentation_payload(api, "Prima IPA")).json()[
+        "fermentation"
+    ]
     first_start = datetime.fromisoformat(first["started_at"]).timestamp()
     ended = api.post(f"/api/fermentations/{first['id']}/end").json()["fermentation"]
     first_end = datetime.fromisoformat(ended["ended_at"]).timestamp()
-    second = api.post("/api/fermentations", json={"name": "Seconda IPA"}).json()["fermentation"]
+    second = api.post("/api/fermentations", json=fermentation_payload(api, "Seconda IPA")).json()[
+        "fermentation"
+    ]
     second_start = datetime.fromisoformat(second["started_at"]).timestamp()
     assert first_start + 0.000123 < first_end < second_start
     assert (

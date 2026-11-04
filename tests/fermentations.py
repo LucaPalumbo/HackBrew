@@ -5,12 +5,16 @@ from typing import Any
 
 import httpx
 
+from tests.payloads import fermentation_payload
+
 
 def assert_single_concurrent_start(api: httpx.Client) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=8) as pool:
         responses = list(
             pool.map(
-                lambda number: api.post("/api/fermentations", json={"name": f"IPA {number}"}),
+                lambda number: api.post(
+                    "/api/fermentations", json=fermentation_payload(api, f"IPA {number}")
+                ),
                 range(8),
             )
         )

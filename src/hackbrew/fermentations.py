@@ -13,7 +13,8 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from hackbrew.models import FermentationName
+from hackbrew.models import FermentationStart
+from hackbrew.pills import require_pill
 from hackbrew.storage import database
 
 router = APIRouter(prefix="/api/fermentations")
@@ -36,6 +37,9 @@ def public_fermentation(document: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": document["_id"],
         "name": document["name"],
+        "pill_id": document["pill_id"],
+        "pill_name": document["pill_name"],
+        "pill_mac": document["pill_mac"],
         "status": document["status"],
         "started_at": datetime.fromtimestamp(document["started_at"], UTC),
         "ended_at": datetime.fromtimestamp(document["ended_at"], UTC)
@@ -78,8 +82,9 @@ def get_active(request: Request) -> dict[str, object]:
 
 
 @router.post("", status_code=201)
-def start_fermentation(payload: FermentationName, request: Request) -> dict[str, object]:
+def start_fermentation(payload: FermentationStart, request: Request) -> dict[str, object]:
     db = database(request)
+    pill = require_pill(db, payload.pill_id)
     if active_fermentation(db):
         raise HTTPException(
             409, "C'è già una fermentazione attiva. Terminala prima di avviarne un'altra."
@@ -91,6 +96,9 @@ def start_fermentation(payload: FermentationName, request: Request) -> dict[str,
     document = {
         "_id": str(uuid4()),
         "name": payload.name,
+        "pill_id": pill["_id"],
+        "pill_name": pill["name"],
+        "pill_mac": pill["mac"],
         "started_at": started_at,
         "ended_at": None,
         "status": "active",
@@ -143,7 +151,11 @@ def reading_filter(document: dict[str, Any]) -> dict[str, Any]:
     bounds = {"$gte": document["started_at"]}
     if document["ended_at"] is not None:
         bounds["$lt"] = document["ended_at"]
-    return {"fermentation_id": document["_id"], "timestamp": bounds}
+    return {
+        "fermentation_id": document["_id"],
+        "pill_id": document["pill_id"],
+        "timestamp": bounds,
+    }
 
 
 def active_snapshot(db: Database[dict[str, Any]]) -> dict[str, object]:

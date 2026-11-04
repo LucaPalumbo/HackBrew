@@ -1,8 +1,8 @@
 # HackBrew
 
-Dashboard web per monitorare una pillola nel fermentatore. Permette di avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Densità SG, temperatura °C, batteria e orario di acquisizione si aggiornano automaticamente. Senza fermentazione attiva mostra l'ultima lettura diagnostica; il pulsante **Aggiorna lettura** permette anche un recupero manuale.
+Dashboard web per registrare pillole Bluetooth e monitorare la fermentazione della birra. La pagina **Dispositivi** mostra la diagnostica live di ciascuna pillola e tutte le misure ricevute. Il monitoraggio permette di scegliere una pillola, avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Senza fermentazione attiva si può scegliere la pillola diagnostica; il pulsante **Aggiorna lettura** permette anche un recupero manuale.
 
-Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. Il perimetro completo è descritto nella [specifica](https://github.com/LucaPalumbo/HackBrew/issues/1).
+Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): questo incremento consegna [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9). Rimane una sola fermentazione attiva globale; card, grafico unico, attuatori e impostazioni del timeout appartengono ai ticket successivi.
 
 ## Requisiti e avvio
 
@@ -24,6 +24,31 @@ Un nuovo avvio recupera l'ultima lettura dal volume esistente.
 
 Per un riavvio con conservazione dei dati, usa `./scripts/hackbrew down` seguito da `./scripts/hackbrew up`: avvio, termine, letture e ultima misura diagnostica restano nel volume MongoDB. Anche la ricostruzione dell'immagine con `up` mantiene quel volume. Questi comandi non richiedono di ricreare le fermentazioni.
 
+## Passaggio deliberato dal dataset MVP
+
+I dati della versione precedente non contengono l'identità della pillola. È stato concordato di eliminarli al passaggio a questa versione, senza migrazione. **Solo per questo passaggio**, usando lo stesso progetto Compose e la stessa configurazione dell'MVP:
+
+```sh
+./scripts/hackbrew down --volumes
+./scripts/hackbrew up
+```
+
+Il primo comando elimina intenzionalmente il volume MongoDB dichiarato del progetto selezionato, quindi tutte le vecchie fermentazioni e letture. Non usare `--volumes` nei normali riavvii. La procedura non usa prune o rimozioni globali di volumi Docker. Un database nuovo non richiede questo reset; l'applicazione non cancella dati all'avvio e rifiuta il vecchio indice delle misure con un messaggio che rimanda a questa procedura.
+
+## Registrare e controllare le pillole
+
+Apri **Dispositivi** dalla navigazione e inserisci **Nome della pillola** e **MAC Bluetooth**. Sono accettati `AA:BB:CC:DD:EE:FF`, `aa-bb-cc-dd-ee-ff` e `aabbccddeeff`: identificano la stessa pillola e vengono conservati nel formato con due punti maiuscolo. Un MAC già registrato restituisce un conflitto, anche con registrazioni concorrenti.
+
+Ogni pillola mostra densità SG, temperatura °C, batteria %, velocità della densità in punti SG/giorno e accelerazioni X/Y/Z, con unità degli accelerometri non specificata. La velocità non valida e le misure opzionali assenti sono indicate come non disponibili. Restano distinti acquisizione, prima ricezione della lettura e ultima comunicazione: un invio ripetuto rinnova il contatto senza cambiare la prima ricezione del campione. Le letture si aggiornano senza ricaricare la pagina.
+
+| Operazione | Risultato |
+| --- | --- |
+| `POST /api/pills` con `{"name":"Pillola IPA","mac":"AA:BB:CC:DD:EE:FF"}` | Registra una pillola; HTTP 201 con `pill` e identificatore stabile. |
+| `GET /api/pills` | Elenca `pills`, con identificatore, nome e MAC normalizzato. |
+| `GET /api/readings/latest?pill_id=<id>` | Restituisce l'ultima lettura della pillola richiesta; HTTP 404 per identità sconosciuta. |
+
+Il bridge corrente deve aggiungere `pill_mac` a ogni invio. L'adeguamento del bridge reale per più pillole e sincronizzazione automatica del registro è il [ticket #11](https://github.com/LucaPalumbo/HackBrew/issues/11); questo incremento può essere provato con messaggi HTTP identificati. Non attribuire un vecchio messaggio privo di MAC a una pillola scelta arbitrariamente.
+
 ## Configurazione
 
 Le impostazioni predefinite funzionano senza un file di configurazione locale. Per cambiarle, copia `.env.example` in `.env` e modifica i valori:
@@ -44,10 +69,11 @@ Questa consegna riguarda l'esecuzione locale; autenticazione e pubblicazione su 
 
 ## Contratto delle letture
 
-Il messaggio attuale del gateway è accettato senza aggiungere identificatori o intestazioni di autenticazione:
+Ogni messaggio deve contenere il MAC Bluetooth di una pillola già registrata; non sono richieste intestazioni di autenticazione:
 
 ```json
 {
+  "pill_mac": "AA:BB:CC:DD:EE:FF",
   "valid": false,
   "gravity_velocity": 0,
   "temperature": 19.6875,
@@ -64,15 +90,19 @@ Il messaggio attuale del gateway è accettato senza aggiungere identificatori o 
 - Temperatura: già espressa in °C. Batteria: percentuale da 0 a 100.
 - `timestamp`: secondi Unix, inclusa la frazione, all'acquisizione sul gateway. La ricezione HTTP è registrata separatamente.
 - `valid`: validità della velocità di variazione della densità; il valore `false` non invalida le altre misure.
-- I campi aggiuntivi del gateway sono accettati; le quattro misure necessarie sono temperatura, densità, batteria e timestamp.
-- Valori più vecchi o dello stesso istante non sostituiscono l'ultima lettura. Viene conservato un solo documento diagnostico, non uno storico di prove.
+- Tutte le quantità e il flag di qualità sono conservati. Le quattro misure necessarie restano temperatura, densità, batteria e timestamp, insieme all'identità della sorgente; i campi opzionali omessi sono restituiti come `null`.
+- Valori più vecchi o dello stesso istante non sostituiscono l'ultima lettura della stessa pillola. Viene conservata una sola ultima lettura diagnostica per pillola, non uno storico di prove.
 
-Per una prova su un database vuoto, se `curl` è disponibile:
+Per una prova su un database vuoto, se `curl` è disponibile, registra prima la pillola:
 
 ```sh
+curl --fail-with-body http://localhost:8080/api/pills \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"Pillola di prova","mac":"AA:BB:CC:DD:EE:FF"}'
+
 curl --fail-with-body http://localhost:8080/telemetry \
   --header 'Content-Type: application/json' \
-  --data '{"valid":false,"temperature":19.6875,"specific_gravity":1050.125,"battery":63.2734375,"timestamp":1700000000.123456}'
+  --data '{"pill_mac":"AA:BB:CC:DD:EE:FF","valid":false,"gravity_velocity":0,"temperature":19.6875,"specific_gravity":1050.125,"accel_x":0,"accel_y":0,"accel_z":0,"battery":63.2734375,"timestamp":1700000000.123456}'
 ```
 
 Il timestamp dell'esempio è storico: il gateway reale deve usare il proprio orario di acquisizione. Una prova più vecchia dell'ultima lettura già salvata non la sostituisce.
@@ -80,21 +110,21 @@ Il timestamp dell'esempio è storico: il gateway reale deve usare il proprio ora
 | Operazione | Risultato |
 | --- | --- |
 | `POST /telemetry` | Salva atomicamente la lettura se è più recente e restituisce l'ultima disponibile. |
-| `GET /api/readings/latest` | Snapshot con `reading` diagnostica (anche `null`), `fermentation` attiva (anche `null`), `fermentation_reading` più recente del suo intervallo, `freshness_seconds` e `server_time`. |
+| `GET /api/readings/latest` | Snapshot con `reading` e `pill_id` selezionati, `pills` con diagnostica e `last_received_at` per sorgente, `fermentation` attiva, `fermentation_reading`, `freshness_seconds` e `server_time`. Senza filtro sceglie la pillola attiva o, in diagnostica, la prima per nome e identificatore. |
 | `GET /api/readings/events` | Stream SSE: invia subito lo stato persistito e poi le variazioni dell'ultima lettura, con eventi `reading`. |
 | `GET /api/health` | Verifica che l'applicazione possa raggiungere MongoDB. |
 
-Un messaggio non valido restituisce HTTP 422. Se l'archivio non è disponibile, l'applicazione restituisce HTTP 503 invece di confermare un salvataggio inesistente. La documentazione interattiva delle API è disponibile all'indirizzo `/docs`.
+Un messaggio non valido restituisce HTTP 422; una sorgente ben formata ma non registrata restituisce HTTP 404. Questi messaggi non modificano letture o ultima comunicazione. Se l'archivio non è disponibile, l'applicazione restituisce HTTP 503 invece di confermare un salvataggio inesistente. La documentazione interattiva delle API è disponibile all'indirizzo `/docs`.
 
 ## Avviare e terminare una fermentazione
 
-Inserisci un nome nel campo **Nome della fermentazione** e premi **Avvia fermentazione**. Il nome non può essere vuoto o contenere soltanto spazi. La dashboard mostra nome, stato e istante di avvio; fino alla prima lettura del suo intervallo mostra un'attesa esplicita, anche se esistono letture diagnostiche precedenti.
+Inserisci un nome nel campo **Nome della fermentazione**, scegli esplicitamente **Pillola della fermentazione** e premi **Avvia fermentazione**. Il nome non può essere vuoto o contenere soltanto spazi. La scelta della pillola è obbligatoria e rimane fissa durante il ciclo. La dashboard mostra nome, pillola, stato e istante di avvio; fino alla prima lettura della pillola nel suo intervallo mostra un'attesa esplicita, anche se esistono letture diagnostiche precedenti o dati di altre pillole.
 
 Premi **Termina fermentazione** per concluderla: un messaggio conferma l'operazione, mentre nome, identificatore, avvio, termine e letture rimangono salvati. Puoi quindi avviarne un'altra, che inizierà senza ereditare le letture della precedente. Le operazioni fallite mostrano un errore e permettono di riprovare. Anche un'altra scheda del browser riceve lo stato corrente attraverso il collegamento live.
 
 | Operazione | Risultato |
 | --- | --- |
-| `POST /api/fermentations` con `{"name":"Prima IPA"}` | Crea e avvia la fermentazione; HTTP 201 con `fermentation`. |
+| `POST /api/fermentations` con `{"name":"Prima IPA","pill_id":"<id registrato>"}` | Crea e avvia la fermentazione; HTTP 201 con `fermentation` e identità della pillola scelta. |
 | `GET /api/fermentations/active` | Restituisce `fermentation` attiva oppure `null`. |
 | `GET /api/fermentations?q=IPA&limit=20&offset=0` | Elenco delle concluse, più recenti per prime; ricerca letterale per nome senza distinzione di maiuscole. Restituisce `fermentations` e `next_offset`. Limite da 1 a 50, predefinito 20. |
 | `GET /api/fermentations/{id}` | Recupera nome, identificatore stabile, stato `active`/`concluded` e istanti UTC `started_at`/`ended_at`. |
@@ -103,15 +133,15 @@ Premi **Termina fermentazione** per concluderla: un messaggio conferma l'operazi
 
 Un nuovo avvio mentre esiste una fermentazione attiva, o il termine di una già conclusa, restituisce HTTP 409 con una spiegazione. Un identificatore sconosciuto restituisce HTTP 404; un nome non valido restituisce HTTP 422. Un indice univoco parziale MongoDB sullo stato attivo impone il vincolo anche con richieste concorrenti; viene creato all'avvio dell'applicazione e rimane nel volume del database. [Riferimento MongoDB sugli indici parziali univoci](https://www.mongodb.com/docs/manual/core/index-partial/).
 
-Le letture sono associate in base al timestamp di acquisizione: **avvio incluso, termine escluso**. Gli estremi dell'intervallo sono conservati come secondi Unix UTC e restituiti dalle API come date ISO 8601. I campioni sono documenti separati, associati all'identificatore della fermentazione. Fuori dagli intervalli conosciuti viene mantenuta soltanto l'ultima lettura diagnostica.
+Le letture sono associate per **pillola e timestamp di acquisizione: avvio incluso, termine escluso**. Gli estremi dell'intervallo sono conservati come secondi Unix UTC e restituiti dalle API come date ISO 8601. I campioni sono documenti separati, associati all'identificatore della fermentazione. Fuori dagli intervalli conosciuti viene mantenuta soltanto l'ultima lettura diagnostica di ogni pillola.
 
 ## Invii ripetuti e letture in ritardo
 
-Una lettura viene riconosciuta dal timestamp e dai valori completi di densità normalizzata, temperatura e batteria. Una consegna identica conserva un solo campione, il suo primo orario di ricezione e il suo identificatore interno, anche con richieste simultanee o dopo un riavvio. Non serve un identificatore aggiuntivo dal gateway; i campi accessori non utilizzati nelle misure non fanno parte di questa identità. Un indice univoco MongoDB e un inserimento condizionale persistente impongono il vincolo. [Riferimento MongoDB sugli upsert e indici univoci](https://www.mongodb.com/docs/manual/reference/method/db.collection.updateOne/).
+Una lettura viene riconosciuta da pillola, timestamp, valori completi di tutte le misure e flag `valid`. Una consegna identica conserva un solo campione, il suo primo orario di ricezione e il suo identificatore interno, anche con richieste simultanee o dopo un riavvio. Cambiare accelerazioni, velocità o flag di qualità produce un campione distinto, senza arrotondamenti. Un indice univoco MongoDB e un inserimento condizionale persistente impongono il vincolo. [Riferimento MongoDB sugli upsert e indici univoci](https://www.mongodb.com/docs/manual/reference/method/db.collection.updateOne/).
 
 Una lettura consegnata in ritardo viene salvata nell'intervallo in cui è stata acquisita, anche se quella fermentazione è già conclusa e ne è iniziata un'altra. Una lettura più vecchia arricchisce lo storico senza sostituire quella corrente. I campioni distinti con lo stesso timestamp rimangono separati: i valori non sono arrotondati per riconoscere i duplicati. Il riepilogo della fermentazione segue lo stesso ordinamento dello storico, per acquisizione e poi ordine di persistenza; la lettura diagnostica non viene sostituita da consegne con timestamp uguale o più vecchio. I messaggi rifiutati dalla validazione non modificano lo storico.
 
-Al primo avvio dopo questo aggiornamento vengono consolidate le eventuali copie identiche già presenti nello storico: rimane il campione con la prima ricezione, conservando i valori e l'identificatore di quella copia. L'operazione precede la creazione dell'indice univoco ed è ripetibile; gli avvii successivi trovano il vincolo già presente. Le misure con contenuto diverso rimangono salvate separatamente.
+Non è prevista una migrazione dal vecchio schema senza identità: il passaggio deliberato descritto sopra parte da un dataset pulito. Gli avvii ordinari del nuovo schema preservano registrazioni, campioni e indici.
 
 ## Grafici e storico
 
@@ -192,17 +222,21 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/browser/test_history_pages.py
 ./scripts/hackbrew test tests/integration/test_delivery.py
 ./scripts/hackbrew test tests/browser/test_delivery_dashboard.py
+./scripts/hackbrew test tests/integration/test_pills.py
+./scripts/hackbrew test tests/browser/test_pills_dashboard.py
 ```
 
 La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. I test di consegna coprono invii ripetuti e concorrenti, valori distinti allo stesso timestamp, letture fuori ordine e confini tra due fermentazioni.
 
-Il controllo completo conserva fuori dall'applicazione uno snapshot JSON di fermentazioni, letture e identificatori. Nel solo database isolato prepara anche dati nella forma precedente all'indice univoco, con copie identiche, poi riavvia il container applicativo. Tutte le verifiche osservano le API e il browser: misure originali preservate, duplicati consolidati, nuove consegne idempotenti anche concorrenti, riapertura dei grafici storici e vincolo di avvio concorrente dopo il riavvio.
+Il controllo completo conserva fuori dall'applicazione uno snapshot JSON di pillole, fermentazioni, letture e identificatori, poi riavvia il container applicativo sullo stesso volume di test. Tutte le verifiche osservano le API e il browser: registrazioni e misure separate per pillola preservate, nuove consegne idempotenti anche concorrenti, riapertura dei grafici storici e vincolo di avvio concorrente dopo il riavvio. La vecchia prova di migrazione dei duplicati MVP è sostituita dalla verifica del nuovo schema persistente, coerentemente con il reset concordato.
 
 Il controllo completo esegue inoltre la prova operativa disponibile separatamente con `./scripts/hackbrew test-recovery`. La prova crea una fermentazione conclusa e una attiva, apre monitoraggio e storico nel browser, ferma MongoDB e verifica gli errori HTTP 503, i valori conservati e un termine fallito nell'interfaccia. Ripristina MongoDB, invia una nuova acquisizione e verifica il recupero automatico dello storico; poi ferma l'applicazione e ricrea entrambi i container mantenendo il volume di test. Controlla dati persistiti, riconnessione live, nuova lettura e successivo termine manuale. I messaggi rifiutati durante i guasti non vengono ritrasmessi dal test.
 
 La procedura usa soltanto un progetto `hackbrew-tests-*` e il suo volume isolato. Un coordinatore esterno interrompe e ripristina i servizi mentre il browser rimane aperto nel container dei test; il container applicativo non espone controlli speciali per i test. Non servono credenziali personali, hardware o dati di produzione. `./scripts/hackbrew test <file o argomenti pytest>` esegue soltanto i casi selezionati, mentre `test` senza argomenti e `check` includono anche riavvio e prova di indisponibilità.
 
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
+
+Le prove browser salvano schermate desktop/telefono in `artifacts/`, esclusa da Git. Le immagini `pillole-1440.png` e `pillole-390.png` mostrano il registro con due pillole e diagnostiche distinte.
 
 ## Struttura
 

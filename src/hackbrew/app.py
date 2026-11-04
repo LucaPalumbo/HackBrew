@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -21,6 +21,8 @@ from hackbrew.fermentations import active_snapshot, initialize_fermentations
 from hackbrew.fermentations import router as fermentations_router
 from hackbrew.history import initialize_history, record_reading
 from hackbrew.models import GatewayReading
+from hackbrew.pills import initialize_pills, pill_snapshots
+from hackbrew.pills import router as pills_router
 from hackbrew.storage import database
 
 
@@ -37,6 +39,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         tz_aware=True,
     ) as client:
         application.state.database = client[os.environ.get("MONGODB_DATABASE", "hackbrew")]
+        initialize_pills(application.state.database)
         initialize_fermentations(application.state.database)
         initialize_history(application.state.database)
         yield
@@ -44,6 +47,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="HackBrew", lifespan=lifespan)
 app.include_router(fermentations_router)
+app.include_router(pills_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -70,15 +74,23 @@ def health(request: Request) -> dict[str, str]:
 
 
 @app.get("/api/readings/latest")
-def latest_reading(request: Request) -> dict[str, object]:
-    reading = (
-        database(request)
-        .get_collection("latest_reading")
-        .find_one({"_id": "latest"}, {"_id": False})
-    )
+def latest_reading(request: Request, pill_id: str | None = None) -> dict[str, object]:
+    db = database(request)
+    pills = pill_snapshots(db)
+    active = active_snapshot(db)
+    fermentation = active["fermentation"]
+    if pill_id is None and isinstance(fermentation, dict):
+        pill_id = fermentation.get("pill_id")
+    selected = next((pill for pill in pills if pill["id"] == pill_id), None)
+    if pill_id is not None and selected is None:
+        raise HTTPException(404, "Pillola non trovata.")
+    if selected is None and pills:
+        selected = pills[0]
     return {
-        "reading": reading,
-        **active_snapshot(database(request)),
+        "reading": selected["reading"] if selected else None,
+        "pill_id": selected["id"] if selected else None,
+        "pills": pills,
+        **active,
         "freshness_seconds": request.app.state.freshness_seconds,
         "server_time": datetime.now(UTC).timestamp(),
     }
@@ -95,6 +107,7 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
             yield ServerSentEvent(event="unavailable", data={}, retry=2000)
             return
         persisted_state = (
+            snapshot["pills"],
             snapshot["reading"],
             snapshot["fermentation"],
             snapshot["fermentation_reading"],
@@ -112,37 +125,42 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
 
 @app.post("/telemetry")
 def receive_reading(payload: GatewayReading, request: Request) -> dict[str, object]:
-    reading = payload.model_dump(
-        include={"temperature", "specific_gravity", "battery", "timestamp"}
-    )
+    db = database(request)
+    pill = db.pills.find_one({"mac": payload.pill_mac})
+    if pill is None:
+        raise HTTPException(404, "MAC Bluetooth non registrato. Registra prima la pillola.")
+    reading = payload.model_dump()
+    reading["pill_id"] = pill["_id"]
     reading["specific_gravity"] = payload.specific_gravity / 1000
-    reading["received_at"] = datetime.now(UTC)
-    record_reading(database(request), reading)
-    reading["_id"] = "latest"
-    collection = database(request).get_collection("latest_reading")
+    received_at = datetime.now(UTC)
+    reading["received_at"] = received_at
+    reading = record_reading(db, reading)
+    collection = db.get_collection("latest_reading")
     update = [
         {
-            "$replaceWith": {
-                "$cond": [
-                    {"$gt": [payload.timestamp, {"$ifNull": ["$timestamp", -1]}]},
-                    {"$literal": reading},
-                    "$$ROOT",
-                ]
+            "$set": {
+                "reading": {
+                    "$cond": [
+                        {"$gt": [payload.timestamp, {"$ifNull": ["$reading.timestamp", -1]}]},
+                        {"$literal": reading},
+                        "$reading",
+                    ]
+                },
+                "last_received_at": {"$max": ["$last_received_at", received_at]},
             }
         }
     ]
     try:
         latest = collection.find_one_and_update(
-            {"_id": "latest"}, update, upsert=True, return_document=ReturnDocument.AFTER
+            {"_id": pill["_id"]}, update, upsert=True, return_document=ReturnDocument.AFTER
         )
     except DuplicateKeyError:
         latest = collection.find_one_and_update(
-            {"_id": "latest"}, update, return_document=ReturnDocument.AFTER
+            {"_id": pill["_id"]}, update, return_document=ReturnDocument.AFTER
         )
     if latest is None:
         raise PyMongoError("Latest reading was not persisted")
-    latest.pop("_id", None)
-    return {"reading": latest}
+    return {"reading": latest["reading"]}
 
 
 frontend_dist = os.environ.get("HACKBREW_FRONTEND_DIST")

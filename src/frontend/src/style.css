@@ -174,7 +174,9 @@ h1 {
   color: #53685b;
   font-size: 13px;
 }
-.fermentation-form input {
+.fermentation-form input,
+.fermentation-form select,
+.diagnostic-selection select {
   width: 100%;
   max-width: 420px;
   min-width: 0;
@@ -185,7 +187,8 @@ h1 {
   color: #17382f;
   font: inherit;
 }
-.fermentation-form input:focus-visible {
+.fermentation-form input:focus-visible,
+select:focus-visible {
   outline: 3px solid #b57826;
   outline-offset: 2px;
 }
@@ -539,6 +542,41 @@ h1 {
   position: sticky;
   top: 0;
   background: #eaf0e2;
+}
+.topbar {
+  flex-wrap: wrap;
+}
+.main-navigation {
+  display: flex;
+  gap: 18px;
+  font-size: 13px;
+}
+.main-navigation a {
+  color: #17382f;
+}
+.main-navigation [aria-current='page'] {
+  font-weight: 750;
+}
+.pill-entry {
+  overflow-wrap: anywhere;
+}
+.pill-quantities {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 18px;
+}
+.pill-quantities dt {
+  color: #53685b;
+  font-size: 13px;
+}
+.pill-quantities dd {
+  margin: 6px 0 0;
+  font-size: 20px;
+}
+.diagnostic-selection {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0;
 }
 @media (max-width: 680px) {
   .dashboard {

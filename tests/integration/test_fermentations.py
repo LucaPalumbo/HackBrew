@@ -4,13 +4,13 @@ import httpx
 import pytest
 
 from tests.fermentations import assert_single_concurrent_start
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 def test_named_fermentazione_starts_and_is_recovered_from_the_api(api: httpx.Client) -> None:
     assert api.get("/api/fermentations/active").json() == {"fermentation": None}
     before = datetime.now(UTC)
-    response = api.post("/api/fermentations", json={"name": "  Prima IPA  "})
+    response = api.post("/api/fermentations", json=fermentation_payload(api, "  Prima IPA  "))
 
     assert response.status_code == 201
     fermentation = response.json()["fermentation"]
@@ -28,14 +28,16 @@ def test_named_fermentazione_starts_and_is_recovered_from_the_api(api: httpx.Cli
 
 def test_concurrent_starts_preserve_exactly_one_active_fermentazione(api: httpx.Client) -> None:
     winner = assert_single_concurrent_start(api)
-    repeated = api.post("/api/fermentations", json={"name": "Un'altra IPA"})
+    repeated = api.post("/api/fermentations", json=fermentation_payload(api, "Un'altra IPA"))
     assert repeated.status_code == 409
     assert "attiva" in repeated.json()["detail"]
     assert api.get("/api/fermentations/active").json()["fermentation"] == winner
 
 
 def test_ending_preserves_fermentazione_and_frees_the_active_slot(api: httpx.Client) -> None:
-    first = api.post("/api/fermentations", json={"name": "Prima IPA"}).json()["fermentation"]
+    first = api.post("/api/fermentations", json=fermentation_payload(api, "Prima IPA")).json()[
+        "fermentation"
+    ]
     response = api.post(f"/api/fermentations/{first['id']}/end")
 
     assert response.status_code == 200
@@ -50,14 +52,16 @@ def test_ending_preserves_fermentazione_and_frees_the_active_slot(api: httpx.Cli
     assert api.post(f"/api/fermentations/{first['id']}/end").status_code == 409
     assert api.get(f"/api/fermentations/{first['id']}").json()["fermentation"] == ended
 
-    response = api.post("/api/fermentations", json={"name": "Seconda IPA"})
+    response = api.post("/api/fermentations", json=fermentation_payload(api, "Seconda IPA"))
     assert response.status_code == 201
     assert response.json()["fermentation"]["id"] != first["id"]
 
 
 def test_letture_belong_only_to_their_monitoring_interval(api: httpx.Client) -> None:
     assert api.post("/telemetry", json=gateway_lettura()).status_code == 200
-    first = api.post("/api/fermentations", json={"name": "Prima IPA"}).json()["fermentation"]
+    first = api.post("/api/fermentations", json=fermentation_payload(api, "Prima IPA")).json()[
+        "fermentation"
+    ]
     path = f"/api/fermentations/{first['id']}/readings"
     assert api.get(path).json()["readings"] == []
     started_at = datetime.fromisoformat(first["started_at"]).timestamp()
@@ -90,14 +94,16 @@ def test_letture_belong_only_to_their_monitoring_interval(api: httpx.Client) -> 
     assert api.get(path).json()["readings"] == collected
     assert api.get("/api/readings/latest").json()["reading"]["specific_gravity"] == 1.030125
 
-    second = api.post("/api/fermentations", json={"name": "Seconda IPA"}).json()["fermentation"]
+    second = api.post("/api/fermentations", json=fermentation_payload(api, "Seconda IPA")).json()[
+        "fermentation"
+    ]
     assert api.get(f"/api/fermentations/{second['id']}/readings").json()["readings"] == []
     assert api.get(path).json()["readings"] == collected
 
 
 @pytest.mark.parametrize("name", ["", "   ", None, 42])
 def test_invalid_name_does_not_start_a_fermentazione(api: httpx.Client, name: object) -> None:
-    response = api.post("/api/fermentations", json={"name": name})
+    response = api.post("/api/fermentations", json=fermentation_payload(api, name))
     assert response.status_code == 422
     assert response.json()["detail"]
     assert api.get("/api/fermentations/active").json()["fermentation"] is None

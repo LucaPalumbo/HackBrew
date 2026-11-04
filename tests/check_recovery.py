@@ -10,7 +10,7 @@ import httpx
 from playwright.sync_api import Page, expect, sync_playwright
 
 from tests.database import reset_test_database
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
 
 
 def phase(ready: str, restored: str, page: Page) -> None:
@@ -49,12 +49,15 @@ def submit_reading(api: httpx.Client, gravity: float, expected_gravity: float) -
 
 def seed(api: httpx.Client) -> dict[str, Any]:
     reset_test_database()
-    closed = api.post("/api/fermentations", json={"name": "Storico recupero"}).json()[
-        "fermentation"
-    ]
+    register_test_pill(api)
+    closed = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "Storico recupero")
+    ).json()["fermentation"]
     submit_reading(api, 1060.125, 1.060125)
     closed = api.post(f"/api/fermentations/{closed['id']}/end").json()["fermentation"]
-    active = api.post("/api/fermentations", json={"name": "Recupero attiva"}).json()["fermentation"]
+    active = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "Recupero attiva")
+    ).json()["fermentation"]
     reading = submit_reading(api, 1040.125, 1.040125)
     return {
         "closed": closed,
@@ -85,7 +88,12 @@ def verify_database_outage(
     rejected = gateway_lettura(timestamp=datetime.now(UTC).timestamp(), specific_gravity=1010.125)
     operations = [
         ("POST", "/telemetry", rejected),
-        ("POST", "/api/fermentations", {"name": "Non salvata"}),
+        (
+            "POST",
+            "/api/fermentations",
+            {"name": "Non salvata", "pill_id": expected["active"]["pill_id"]},
+        ),
+        ("POST", "/api/pills", {"name": "Non registrata", "mac": "11:22:33:44:55:66"}),
         ("POST", f"/api/fermentations/{expected['active']['id']}/end", None),
         ("GET", "/api/readings/latest", None),
         ("GET", "/api/fermentations/active", None),
@@ -194,7 +202,12 @@ def verify_application_recreation(
     current.get_by_role("button", name="Termina fermentazione").click()
     expect(current.get_by_role("status", name="Esito operazione")).to_contain_text("conclusa")
     assert api.get("/api/fermentations/active").json()["fermentation"] is None
-    assert api.post("/api/fermentations", json={"name": "Nuovo monitoraggio"}).status_code == 201
+    assert (
+        api.post(
+            "/api/fermentations", json=fermentation_payload(api, "Nuovo monitoraggio")
+        ).status_code
+        == 201
+    )
 
 
 def main() -> None:

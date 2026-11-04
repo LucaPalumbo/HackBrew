@@ -11,15 +11,15 @@ from typing import Any
 import httpx
 from playwright.sync_api import expect, sync_playwright
 
-from tests.database import reset_test_database, seed_legacy_duplicates
+from tests.database import reset_test_database
 from tests.fermentations import assert_single_concurrent_start
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
 
 
 def start_with_reading(
     api: httpx.Client, name: str, gravity: float, expected_gravity: float
 ) -> dict[str, Any]:
-    response = api.post("/api/fermentations", json={"name": name})
+    response = api.post("/api/fermentations", json=fermentation_payload(api, name))
     response.raise_for_status()
     fermentation: dict[str, Any] = response.json()["fermentation"]
     timestamp = datetime.fromisoformat(fermentation["started_at"]).timestamp() + 0.000123
@@ -37,12 +37,22 @@ def start_with_reading(
 
 def seed(api: httpx.Client) -> dict[str, Any]:
     reset_test_database()
+    register_test_pill(api)
     first = start_with_reading(api, "Persistenza conclusa", 1040.125, 1.040125)
     response = api.post(f"/api/fermentations/{first['id']}/end")
     response.raise_for_status()
     concluded = response.json()["fermentation"]
     active = start_with_reading(api, "Persistenza attiva", 1050.125, 1.050125)
+    other = api.post(
+        "/api/pills", json={"name": "Seconda pillola", "mac": "11:22:33:44:55:66"}
+    ).json()["pill"]
+    other_reading = api.post(
+        "/telemetry", json=gateway_lettura(pill_mac=other["mac"], specific_gravity=1080.125)
+    ).json()["reading"]
     expected = {
+        "pills": api.get("/api/pills").json()["pills"],
+        "other_pill": other,
+        "other_reading": other_reading,
         "concluded": concluded,
         "active": active,
         "reading": api.get("/api/readings/latest").json()["reading"],
@@ -53,11 +63,17 @@ def seed(api: httpx.Client) -> dict[str, Any]:
             "readings"
         ],
     }
-    seed_legacy_duplicates()
     return expected
 
 
 def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
+    assert api.get("/api/pills").json()["pills"] == expected["pills"]
+    assert (
+        api.get("/api/readings/latest", params={"pill_id": expected["other_pill"]["id"]}).json()[
+            "reading"
+        ]
+        == expected["other_reading"]
+    )
     for status, gravity in (("concluded", 1040.125), ("active", 1050.125)):
         reading = expected[f"{status}_readings"][0]
         payload = gateway_lettura(timestamp=reading["timestamp"], specific_gravity=gravity)
@@ -76,7 +92,10 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
         assert history == expected[f"{status}_readings"]
     assert api.get("/api/readings/latest").json()["reading"] == expected["reading"]
     assert api.get("/api/fermentations/active").json()["fermentation"] == expected["active"]
-    assert api.post("/api/fermentations", json={"name": "Avvio bloccato"}).status_code == 409
+    assert (
+        api.post("/api/fermentations", json=fermentation_payload(api, "Avvio bloccato")).status_code
+        == 409
+    )
 
     timestamp = expected["reading"]["timestamp"] + 0.000001
     payload = gateway_lettura(timestamp=timestamp, specific_gravity=1030.125)

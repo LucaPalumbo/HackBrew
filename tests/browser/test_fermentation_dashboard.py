@@ -4,7 +4,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, Route, expect
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 @pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
@@ -15,6 +15,7 @@ def test_start_read_and_end_fermentazione_without_reusing_diagnostic_history(
     page.set_viewport_size({"width": width, "height": height})
     page.goto(str(api.base_url))
     page.get_by_label("Nome della fermentazione").fill("Prima IPA")
+    page.get_by_label("Pillola della fermentazione").select_option(index=1)
     page.get_by_role("button", name="Avvia fermentazione").click()
     expect(page.get_by_role("heading", name="Prima IPA", exact=True)).to_be_visible()
     expect(
@@ -51,6 +52,7 @@ def test_start_read_and_end_fermentazione_without_reusing_diagnostic_history(
     assert len(api.get(f"/api/fermentations/{first['id']}/readings").json()["readings"]) == 1
 
     page.get_by_label("Nome della fermentazione").fill("Seconda IPA")
+    page.get_by_label("Pillola della fermentazione").select_option(index=1)
     page.get_by_role("button", name="Avvia fermentazione").click()
     expect(page.get_by_role("heading", name="Seconda IPA", exact=True)).to_be_visible()
     expect(
@@ -69,12 +71,18 @@ def test_invalid_name_and_conflicting_start_are_visible_without_replacing_active
 ) -> None:
     page.goto(str(api.base_url))
     page.get_by_label("Nome della fermentazione").fill("   ")
+    page.get_by_label("Pillola della fermentazione").select_option(index=1)
     page.get_by_role("button", name="Avvia fermentazione").click()
     expect(page.get_by_role("alert")).to_have_text("Inserisci un nome per la fermentazione.")
     assert api.get("/api/fermentations/active").json()["fermentation"] is None
 
     def competing_start(route: Route) -> None:
-        assert api.post("/api/fermentations", json={"name": "IPA già attiva"}).status_code == 201
+        assert (
+            api.post(
+                "/api/fermentations", json=fermentation_payload(api, "IPA già attiva")
+            ).status_code
+            == 201
+        )
         route.continue_()
 
     page.route("**/api/fermentations", competing_start)
@@ -87,7 +95,9 @@ def test_invalid_name_and_conflicting_start_are_visible_without_replacing_active
 
 
 def test_failed_end_keeps_active_state_and_can_be_retried(page: Page, api: httpx.Client) -> None:
-    first = api.post("/api/fermentations", json={"name": "IPA da terminare"}).json()["fermentation"]
+    first = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "IPA da terminare")
+    ).json()["fermentation"]
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(str(api.base_url))
     page.route("**/api/fermentations/*/end", lambda route: route.abort("connectionfailed"))
@@ -107,7 +117,7 @@ def test_failed_end_keeps_active_state_and_can_be_retried(page: Page, api: httpx
 
 def test_long_fermentazione_name_remains_readable_on_phone(page: Page, api: httpx.Client) -> None:
     name = "IPA" * 50
-    assert api.post("/api/fermentations", json={"name": name}).status_code == 201
+    assert api.post("/api/fermentations", json=fermentation_payload(api, name)).status_code == 201
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(str(api.base_url))
     expect(page.get_by_role("heading", name=name, exact=True)).to_be_visible()

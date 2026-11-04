@@ -4,17 +4,21 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.payloads import gateway_lettura
+from tests.payloads import fermentation_payload, gateway_lettura
 
 
 @pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
 def test_delayed_samples_enrich_history_without_replacing_current_values(
     page: Page, api: httpx.Client, width: int, height: int
 ) -> None:
-    first = api.post("/api/fermentations", json={"name": "Prima IPA"}).json()["fermentation"]
+    first = api.post("/api/fermentations", json=fermentation_payload(api, "Prima IPA")).json()[
+        "fermentation"
+    ]
     first_timestamp = datetime.fromisoformat(first["started_at"]).timestamp() + 0.000123
     assert api.post(f"/api/fermentations/{first['id']}/end").status_code == 200
-    second = api.post("/api/fermentations", json={"name": "Seconda IPA"}).json()["fermentation"]
+    second = api.post("/api/fermentations", json=fermentation_payload(api, "Seconda IPA")).json()[
+        "fermentation"
+    ]
     second_start = datetime.fromisoformat(second["started_at"]).timestamp()
     newest = gateway_lettura(timestamp=second_start + 0.000124, specific_gravity=1040)
     assert api.post("/telemetry", json=newest).status_code == 200

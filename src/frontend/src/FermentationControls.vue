@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { Fermentation } from './fermentations'
+import type { PillSnapshot } from './readings'
 
 const props = defineProps<{
   fermentation: Fermentation | null
   loading: boolean
+  pills: PillSnapshot[]
 }>()
 const emit = defineEmits<{ changed: [] }>()
 const name = ref('')
+const pillId = ref('')
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -36,7 +39,7 @@ async function submit(action: 'start' | 'end') {
         headers: { 'Content-Type': 'application/json' },
         body:
           action === 'start'
-            ? JSON.stringify({ name: name.value.trim() })
+            ? JSON.stringify({ name: name.value.trim(), pill_id: pillId.value })
             : undefined,
         signal: AbortSignal.timeout(10000),
       },
@@ -74,6 +77,9 @@ async function submit(action: 'start' | 'end') {
             dateFormat.format(new Date(fermentation.started_at))
           }}</time>
         </p>
+        <p class="fermentation-period">
+          {{ fermentation.pill_name }} · {{ fermentation.pill_mac }}
+        </p>
       </div>
       <button
         class="refresh"
@@ -99,7 +105,28 @@ async function submit(action: 'start' | 'end') {
           placeholder="Es. Prima IPA"
         />
       </div>
-      <button class="refresh" type="submit" :disabled="saving || loading">
+      <div>
+        <label for="fermentation-pill">Pillola della fermentazione</label>
+        <select
+          id="fermentation-pill"
+          v-model="pillId"
+          required
+          :disabled="saving || loading || !pills.length"
+        >
+          <option disabled value="">Scegli una pillola</option>
+          <option v-for="pill in pills" :key="pill.id" :value="pill.id">
+            {{ pill.name }} · {{ pill.mac }}
+          </option>
+        </select>
+        <p v-if="!pills.length" class="metric-caption">
+          Registra prima una pillola nella pagina Dispositivi.
+        </p>
+      </div>
+      <button
+        class="refresh"
+        type="submit"
+        :disabled="saving || loading || !pills.length"
+      >
         {{ saving ? 'Operazione in corso…' : 'Avvia fermentazione' }}
       </button>
     </form>

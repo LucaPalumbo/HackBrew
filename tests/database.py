@@ -22,13 +22,3 @@ def reset_test_database() -> None:
     with isolated_database() as db:
         for collection in db.list_collection_names():
             db[collection].delete_many({})
-
-
-def seed_legacy_duplicates() -> None:
-    """Arrange the pre-idempotency schema; verification uses only the public API."""
-    with isolated_database() as db:
-        collection = db.fermentation_readings
-        collection.drop_index("unique_measurement")
-        copies = list(collection.find({}, {"_id": False}))
-        if copies:
-            collection.insert_many(copies)
