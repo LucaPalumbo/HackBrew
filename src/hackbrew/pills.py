@@ -17,8 +17,24 @@ def initialize_pills(db: Database[dict[str, Any]]) -> None:
     db.pills.create_index("mac", unique=True)
 
 
-def public_pill(document: dict[str, Any]) -> dict[str, Any]:
-    return {"id": document["_id"], "name": document["name"], "mac": document["mac"]}
+def public_pill(document: dict[str, Any], active_identifier: str | None = None) -> dict[str, Any]:
+    return {
+        "id": document["_id"],
+        "name": document["name"],
+        "mac": document["mac"],
+        "available": active_identifier is None,
+        "active_fermentation_id": active_identifier,
+    }
+
+
+def registered_pills(db: Database[dict[str, Any]]) -> list[dict[str, Any]]:
+    assignments = {
+        entry["pill_id"]: entry["_id"] for entry in db.fermentations.find({"status": "active"})
+    }
+    return [
+        public_pill(pill, assignments.get(pill["_id"]))
+        for pill in db.pills.find().sort([("name", 1), ("_id", 1)])
+    ]
 
 
 def require_pill(db: Database[dict[str, Any]], identifier: str) -> dict[str, Any]:
@@ -32,17 +48,17 @@ def pill_snapshots(db: Database[dict[str, Any]]) -> list[dict[str, Any]]:
     latest = {entry["_id"]: entry for entry in db.latest_reading.find()}
     return [
         {
-            **public_pill(pill),
-            "reading": latest.get(pill["_id"], {}).get("reading"),
-            "last_received_at": latest.get(pill["_id"], {}).get("last_received_at"),
+            **pill,
+            "reading": latest.get(pill["id"], {}).get("reading"),
+            "last_received_at": latest.get(pill["id"], {}).get("last_received_at"),
         }
-        for pill in db.pills.find().sort([("name", 1), ("_id", 1)])
+        for pill in registered_pills(db)
     ]
 
 
 @router.get("")
 def list_pills(request: Request) -> dict[str, object]:
-    return {"pills": [public_pill(pill) for pill in database(request).pills.find().sort("name", 1)]}
+    return {"pills": registered_pills(database(request))}
 
 
 @router.post("", status_code=201)

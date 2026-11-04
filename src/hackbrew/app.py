@@ -77,7 +77,7 @@ def health(request: Request) -> dict[str, str]:
 def latest_reading(request: Request, pill_id: str | None = None) -> dict[str, object]:
     db = database(request)
     pills = pill_snapshots(db)
-    active = active_snapshot(db)
+    active = active_snapshot(db, pill_id)
     fermentation = active["fermentation"]
     if pill_id is None and isinstance(fermentation, dict):
         pill_id = fermentation.get("pill_id")
@@ -107,6 +107,7 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
             yield ServerSentEvent(event="unavailable", data={}, retry=2000)
             return
         persisted_state = (
+            snapshot["active_fermentations"],
             snapshot["pills"],
             snapshot["reading"],
             snapshot["fermentation"],

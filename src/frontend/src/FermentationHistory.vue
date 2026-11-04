@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import MeasurementChart from './MeasurementChart.vue'
+import FermentationControls from './FermentationControls.vue'
 import type { Fermentation } from './fermentations'
 import type { Reading } from './readings'
 import { useLatestRequest } from './useLatestRequest'
@@ -11,11 +12,14 @@ const props = defineProps<{
   live: boolean
   recoveryRevision: number
 }>()
+const emit = defineEmits<{ changed: [] }>()
+const notice = ref('')
+const detailSection = ref<HTMLElement | null>(null)
 const fermentation = ref<Fermentation | null>(null)
 const readings = ref<Reading[]>([])
 const nextBefore = ref<string | null>(null)
 const cursors = ref<Array<string | null>>([null])
-const { loading, error, run, invalidate } = useLatestRequest(
+const { loading, error, run, invalidate, refresh } = useLatestRequest(
   'Non è stato possibile recuperare lo storico. Riprova.',
 )
 const latest = computed(() => readings.value.at(-1))
@@ -28,14 +32,19 @@ const temperatures = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 1,
 })
 let loadedId: string | null = null
-let lastRecovery = props.recoveryRevision
+let loadedLive = props.live
+let requestedBefore: string | null = null
+let requestedDirection: 'refresh' | 'older' | 'newer' = 'refresh'
 
 async function load(
-  before: string | null = cursors.value.at(-1) ?? null,
-  direction: 'refresh' | 'older' | 'newer' = 'refresh',
+  before: string | null = requestedBefore,
+  direction: 'refresh' | 'older' | 'newer' = requestedDirection,
+  background = false,
 ): Promise<boolean> {
   const identifier = props.identifier
   if (!identifier) return false
+  requestedBefore = before
+  requestedDirection = direction
   return run(
     async (signal) => {
       const query = new URLSearchParams({ limit: '200' })
@@ -65,7 +74,9 @@ async function load(
       nextBefore.value = historyPayload.next_before
       if (direction === 'older') cursors.value.push(before)
       if (direction === 'newer') cursors.value.pop()
+      requestedDirection = 'refresh'
     },
+    background,
   )
 }
 function older() {
@@ -76,12 +87,24 @@ function newer() {
   if (cursors.value.length > 1)
     void load(cursors.value[cursors.value.length - 2], 'newer')
 }
+function ended(updated: Fermentation) {
+  fermentation.value = updated
+  notice.value = `Fermentazione “${updated.name}” conclusa.`
+  emit('changed')
+  void load()
+}
 watch(
-  () => [props.identifier, props.revision, props.recoveryRevision] as const,
-  ([identifier, , recovery]) => {
+  () =>
+    [
+      props.identifier,
+      props.revision,
+      props.recoveryRevision,
+      props.live,
+    ] as const,
+  ([identifier, , , live]) => {
     const changed = identifier !== loadedId
-    const recovered = recovery !== lastRecovery
-    lastRecovery = recovery
+    const viewChanged = live !== loadedLive
+    loadedLive = live
     if (changed) {
       invalidate()
       loadedId = identifier
@@ -89,13 +112,20 @@ watch(
       readings.value = []
       nextBefore.value = null
       cursors.value = [null]
+      requestedBefore = null
+      requestedDirection = 'refresh'
       error.value = ''
+      notice.value = ''
     }
-    if (
-      identifier &&
-      (changed || recovered || (props.live && cursors.value.length === 1))
-    )
-      void load()
+    if ((changed || viewChanged) && identifier && !live)
+      void nextTick(() => {
+        detailSection.value?.focus({ preventScroll: true })
+        detailSection.value?.scrollIntoView({ block: 'start' })
+      })
+    if (identifier) {
+      if (changed || viewChanged) void load()
+      else refresh(() => load(requestedBefore, requestedDirection, true))
+    }
   },
   { immediate: true },
 )
@@ -104,6 +134,8 @@ watch(
 <template>
   <section
     v-if="identifier"
+    ref="detailSection"
+    tabindex="-1"
     class="history-data"
     aria-label="Dati della fermentazione"
   >
@@ -111,12 +143,29 @@ watch(
       {{
         live
           ? 'Andamento della fermentazione'
-          : `Storico: ${fermentation?.name ?? (error ? 'non disponibile' : 'caricamento…')}`
+          : `${fermentation?.status === 'active' ? 'Dettaglio' : 'Storico'}: ${fermentation?.name ?? (error ? 'non disponibile' : 'caricamento…')}`
       }}
     </h2>
+    <FermentationControls
+      v-if="!live && fermentation?.status === 'active'"
+      :fermentation="fermentation"
+      :pills="[]"
+      :loading="loading"
+      @changed="ended"
+    />
+    <p
+      v-if="notice"
+      class="operation-notice"
+      role="status"
+      aria-label="Esito operazione"
+    >
+      {{ notice }}
+    </p>
     <p v-if="fermentation" class="history-period">
       {{ fermentation.name }} ·
-      {{ fermentation.status === 'concluded' ? 'Conclusa' : 'In corso' }}<br />
+      {{ fermentation.status === 'concluded' ? 'Conclusa' : 'In corso' }} · Solo
+      monitoraggio<br />
+      {{ fermentation.pill_name }} · {{ fermentation.pill_mac }}<br />
       <time :datetime="fermentation.started_at">{{
         dates.format(new Date(fermentation.started_at))
       }}</time>

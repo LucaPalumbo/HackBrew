@@ -22,17 +22,24 @@ def test_concluded_fermentazioni_can_be_found_by_name_without_listing_the_active
         == 201
     )
 
-    response = api.get("/api/fermentations", params={"limit": 1})
+    response = api.get("/api/fermentations", params={"status": "concluded", "limit": 1})
     assert response.status_code == 200
     page = response.json()
     assert [entry["id"] for entry in page["fermentations"]] == [second["id"]]
     assert page["next_offset"] == 1
-    older = api.get("/api/fermentations", params={"limit": 1, "offset": 1}).json()
+    older = api.get(
+        "/api/fermentations", params={"status": "concluded", "limit": 1, "offset": 1}
+    ).json()
     assert [entry["id"] for entry in older["fermentations"]] == [first["id"]]
     assert older["next_offset"] is None
-    found = api.get("/api/fermentations", params={"q": "prima ipa"}).json()
+    found = api.get("/api/fermentations", params={"status": "concluded", "q": "prima ipa"}).json()
     assert [entry["id"] for entry in found["fermentations"]] == [first["id"]]
-    assert api.get("/api/fermentations", params={"q": ".*"}).json()["fermentations"] == []
+    assert (
+        api.get("/api/fermentations", params={"status": "concluded", "q": ".*"}).json()[
+            "fermentations"
+        ]
+        == []
+    )
 
 
 def test_history_pages_keep_original_samples_in_acquisition_order(api: httpx.Client) -> None:

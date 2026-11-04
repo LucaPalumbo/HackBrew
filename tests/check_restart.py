@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 from playwright.sync_api import expect, sync_playwright
 
-from tests.database import reset_test_database
+from tests.database import arrange_single_active_index, reset_test_database
 from tests.fermentations import assert_single_concurrent_start
 from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
 
@@ -35,6 +35,46 @@ def start_with_reading(
     return fermentation
 
 
+def seed_upgrade(api: httpx.Client) -> dict[str, Any]:
+    reset_test_database()
+    register_test_pill(api)
+    fermentation = start_with_reading(api, "Preservata da versione 9", 1050.125, 1.050125)
+    other = api.post(
+        "/api/pills", json={"name": "Seconda pillola", "mac": "11:22:33:44:55:66"}
+    ).json()["pill"]
+    expected = {
+        "fermentation": fermentation,
+        "pills": api.get("/api/pills").json()["pills"],
+        "readings": api.get(f"/api/fermentations/{fermentation['id']}/readings").json()["readings"],
+        "other_pill": other,
+    }
+    arrange_single_active_index()
+    return expected
+
+
+def verify_upgrade(api: httpx.Client, expected: dict[str, Any]) -> None:
+    identifier = expected["fermentation"]["id"]
+    assert (
+        api.get(f"/api/fermentations/{identifier}").json()["fermentation"]
+        == expected["fermentation"]
+    )
+    assert (
+        api.get(f"/api/fermentations/{identifier}/readings").json()["readings"]
+        == expected["readings"]
+    )
+    assert api.get("/api/pills").json()["pills"] == expected["pills"]
+    second = api.post(
+        "/api/fermentations",
+        json={"name": "Ora parallela", "pill_id": expected["other_pill"]["id"]},
+    )
+    assert second.status_code == 201
+    assert (
+        api.post("/api/fermentations", json=fermentation_payload(api, "Riuso bloccato")).status_code
+        == 409
+    )
+    assert len(api.get("/api/fermentations/active").json()["fermentations"]) == 2
+
+
 def seed(api: httpx.Client) -> dict[str, Any]:
     reset_test_database()
     register_test_pill(api)
@@ -46,12 +86,23 @@ def seed(api: httpx.Client) -> dict[str, Any]:
     other = api.post(
         "/api/pills", json={"name": "Seconda pillola", "mac": "11:22:33:44:55:66"}
     ).json()["pill"]
+    other_active = api.post(
+        "/api/fermentations", json={"name": "Seconda persistenza attiva", "pill_id": other["id"]}
+    ).json()["fermentation"]
+    other_timestamp = datetime.fromisoformat(other_active["started_at"]).timestamp() + 0.000123
     other_reading = api.post(
-        "/telemetry", json=gateway_lettura(pill_mac=other["mac"], specific_gravity=1080.125)
+        "/telemetry",
+        json=gateway_lettura(
+            pill_mac=other["mac"], timestamp=other_timestamp, specific_gravity=1080.125
+        ),
     ).json()["reading"]
     expected = {
         "pills": api.get("/api/pills").json()["pills"],
         "other_pill": other,
+        "other_active": other_active,
+        "other_history": api.get(f"/api/fermentations/{other_active['id']}/readings").json()[
+            "readings"
+        ],
         "other_reading": other_reading,
         "concluded": concluded,
         "active": active,
@@ -74,6 +125,14 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
         ]
         == expected["other_reading"]
     )
+    other_id = expected["other_active"]["id"]
+    assert (
+        api.get(f"/api/fermentations/{other_id}").json()["fermentation"] == expected["other_active"]
+    )
+    assert (
+        api.get(f"/api/fermentations/{other_id}/readings").json()["readings"]
+        == expected["other_history"]
+    )
     for status, gravity in (("concluded", 1040.125), ("active", 1050.125)):
         reading = expected[f"{status}_readings"][0]
         payload = gateway_lettura(timestamp=reading["timestamp"], specific_gravity=gravity)
@@ -91,7 +150,9 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
         assert len(history) == 1
         assert history == expected[f"{status}_readings"]
     assert api.get("/api/readings/latest").json()["reading"] == expected["reading"]
-    assert api.get("/api/fermentations/active").json()["fermentation"] == expected["active"]
+    active = api.get("/api/fermentations/active").json()
+    assert active["fermentation"] is None
+    assert {row["id"] for row in active["fermentations"]} == {expected["active"]["id"], other_id}
     assert (
         api.post("/api/fermentations", json=fermentation_payload(api, "Avvio bloccato")).status_code
         == 409
@@ -139,17 +200,31 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["seed", "verify"])
+    parser.add_argument(
+        "phase",
+        choices=["upgrade-seed", "upgrade-verify", "persistence-seed", "persistence-verify"],
+    )
     phase = parser.parse_args().phase
     if os.environ["MONGODB_DATABASE"] != "hackbrew_test":
         raise RuntimeError("Restart checks require the isolated hackbrew_test database")
 
     with httpx.Client(base_url=os.environ["HACKBREW_BASE_URL"], timeout=10) as api:
-        if phase == "seed":
-            print(json.dumps(seed(api)))
+        if phase.endswith("-seed"):
+            print(json.dumps(seed_upgrade(api) if phase == "upgrade-seed" else seed(api)))
         else:
-            verify(api, json.load(sys.stdin))
-            print("Persistence verify: fermentazioni, letture e vincolo concorrente preservati.")
+            expected = json.load(sys.stdin)
+            if phase == "upgrade-verify":
+                verify_upgrade(api, expected)
+                print(
+                    "Upgrade verify: vincolo per pillola installato "
+                    "senza perdita dei dati della versione 9."
+                )
+            else:
+                verify(api, expected)
+                print(
+                    "Persistence verify: due fermentazioni attive, "
+                    "letture e vincoli per pillola preservati."
+                )
 
 
 if __name__ == "__main__":

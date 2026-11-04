@@ -19,4 +19,6 @@ export type PillSnapshot = {
   mac: string
   reading: Reading | null
   last_received_at: string | null
+  available: boolean
+  active_fermentation_id: string | null
 }

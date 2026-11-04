@@ -1,3 +1,5 @@
+import type { Reading } from './readings'
+
 export type Fermentation = {
   id: string
   name: string
@@ -7,4 +9,10 @@ export type Fermentation = {
   status: 'active' | 'concluded'
   started_at: string
   ended_at: string | null
+  control_mode: 'monitor_only'
+}
+
+export type FermentationSummary = Fermentation & {
+  latest_reading: Reading | null
+  reading_count: number
 }

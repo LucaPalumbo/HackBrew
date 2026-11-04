@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Fermentation } from './fermentations'
 import type { PillSnapshot } from './readings'
 
@@ -7,10 +7,21 @@ const props = defineProps<{
   fermentation: Fermentation | null
   loading: boolean
   pills: PillSnapshot[]
+  allowStart?: boolean
 }>()
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{ changed: [fermentation: Fermentation] }>()
 const name = ref('')
 const pillId = ref('')
+const availablePills = computed(() =>
+  props.pills.filter((pill) => pill.available),
+)
+watch(
+  () => props.pills,
+  () => {
+    if (!availablePills.value.some((pill) => pill.id === pillId.value))
+      pillId.value = ''
+  },
+)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -55,7 +66,7 @@ async function submit(action: 'start' | 'end') {
     }
     notice.value = `Fermentazione “${payload.fermentation.name}” ${action === 'start' ? 'avviata' : 'conclusa'}.`
     if (action === 'start') name.value = ''
-    emit('changed')
+    emit('changed', payload.fermentation)
   } catch {
     error.value =
       'Non è stato possibile confermare l’operazione. Controlla il collegamento e riprova.'
@@ -90,7 +101,11 @@ async function submit(action: 'start' | 'end') {
         {{ saving ? 'Operazione in corso…' : 'Termina fermentazione' }}
       </button>
     </div>
-    <form v-else class="fermentation-form" @submit.prevent="submit('start')">
+    <form
+      v-if="!fermentation || allowStart"
+      class="fermentation-form"
+      @submit.prevent="submit('start')"
+    >
       <div>
         <p class="eyebrow">Un nuovo inizio</p>
         <h2>Avvia una fermentazione</h2>
@@ -111,21 +126,30 @@ async function submit(action: 'start' | 'end') {
           id="fermentation-pill"
           v-model="pillId"
           required
-          :disabled="saving || loading || !pills.length"
+          :disabled="saving || loading || !availablePills.length"
         >
           <option disabled value="">Scegli una pillola</option>
-          <option v-for="pill in pills" :key="pill.id" :value="pill.id">
-            {{ pill.name }} · {{ pill.mac }}
+          <option
+            v-for="pill in pills"
+            :key="pill.id"
+            :value="pill.id"
+            :disabled="!pill.available"
+          >
+            {{ pill.name }} · {{ pill.mac
+            }}{{ pill.available ? '' : ' · Occupata' }}
           </option>
         </select>
         <p v-if="!pills.length" class="metric-caption">
           Registra prima una pillola nella pagina Dispositivi.
         </p>
+        <p v-else-if="!availablePills.length" class="metric-caption">
+          Tutte le pillole sono già assegnate a fermentazioni attive.
+        </p>
       </div>
       <button
         class="refresh"
         type="submit"
-        :disabled="saving || loading || !pills.length"
+        :disabled="saving || loading || !availablePills.length"
       >
         {{ saving ? 'Operazione in corso…' : 'Avvia fermentazione' }}
       </button>

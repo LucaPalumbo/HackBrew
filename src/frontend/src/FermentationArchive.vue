@@ -1,28 +1,31 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import type { Fermentation } from './fermentations'
+import type { FermentationSummary } from './fermentations'
 import { useLatestRequest } from './useLatestRequest'
 
 const props = defineProps<{
   selectedId: string | null
   activeId: string | null
   recoveryRevision: number
+  revision: number
 }>()
 const emit = defineEmits<{ select: [identifier: string | null] }>()
-const entries = ref<Fermentation[]>([])
+const entries = ref<FermentationSummary[]>([])
 const search = ref('')
 const appliedSearch = ref('')
 const offset = ref(0)
+const requestedOffset = ref(0)
 const nextOffset = ref<number | null>(null)
-const { loading, error, run } = useLatestRequest(
-  'Non è stato possibile recuperare le fermentazioni concluse.',
+const { loading, error, run, refresh } = useLatestRequest(
+  'Non è stato possibile recuperare le fermentazioni.',
 )
 const dates = new Intl.DateTimeFormat('it-IT', {
   dateStyle: 'medium',
   timeStyle: 'short',
 })
 
-async function load(target = 0) {
+async function load(target = 0, background = false) {
+  requestedOffset.value = target
   await run(
     async (signal) => {
       const query = new URLSearchParams({
@@ -36,7 +39,7 @@ async function load(target = 0) {
       })
       if (!response.ok) throw new Error('Archive unavailable')
       const payload: {
-        fermentations: Fermentation[]
+        fermentations: FermentationSummary[]
         next_offset: number | null
       } = await response.json()
       return payload
@@ -46,6 +49,7 @@ async function load(target = 0) {
       nextOffset.value = payload.next_offset
       offset.value = target
     },
+    background,
   )
 }
 function searchByName() {
@@ -56,17 +60,17 @@ onMounted(() => {
   void load()
 })
 watch(
-  () => [props.activeId, props.recoveryRevision] as const,
+  () => [props.activeId, props.recoveryRevision, props.revision] as const,
   () => {
-    void load(offset.value)
+    refresh(() => load(requestedOffset.value, true))
   },
 )
 </script>
 
 <template>
-  <section class="archive" aria-label="Storico fermentazioni">
+  <section class="archive" aria-label="Fermentazioni">
     <div class="archive-heading">
-      <h2>Storico fermentazioni</h2>
+      <h2>Le tue fermentazioni</h2>
       <button
         class="text-button"
         type="button"
@@ -91,7 +95,7 @@ watch(
     </form>
     <p v-if="error" class="error" role="alert">
       {{ error }}
-      <button class="text-button" type="button" @click="load(offset)">
+      <button class="text-button" type="button" @click="load(requestedOffset)">
         Riprova elenco
       </button>
     </p>
@@ -100,22 +104,74 @@ watch(
       {{
         appliedSearch
           ? 'Nessuna fermentazione corrisponde alla ricerca.'
-          : 'Nessuna fermentazione conclusa.'
+          : 'Nessuna fermentazione registrata.'
       }}
     </p>
-    <ul v-if="entries.length" class="archive-list">
+    <ul v-if="entries.length" class="fermentation-cards">
       <li v-for="entry in entries" :key="entry.id">
         <button
           type="button"
-          class="archive-entry"
+          class="fermentation-card"
+          :class="{ 'fermentation-card-active': entry.status === 'active' }"
           :aria-label="`Apri ${entry.name}, ${dates.format(new Date(entry.started_at))}`"
           :aria-current="selectedId === entry.id ? 'true' : undefined"
           @click="emit('select', entry.id)"
         >
-          <span>{{ entry.name }}</span
-          ><time :datetime="entry.started_at">{{
-            dates.format(new Date(entry.started_at))
-          }}</time>
+          <span class="card-title">{{ entry.name }}</span>
+          <span class="card-status">{{
+            entry.status === 'active' ? 'In corso' : 'Conclusa'
+          }}</span>
+          <span class="card-pill"
+            >{{ entry.pill_name }} · {{ entry.pill_mac }}</span
+          >
+          <span class="card-mode">Solo monitoraggio</span>
+          <span v-if="entry.latest_reading" class="card-values">
+            <span
+              >Temperatura
+              <strong
+                >{{
+                  entry.latest_reading.temperature.toLocaleString('it-IT', {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                  })
+                }}
+                °C</strong
+              ></span
+            >
+            <span
+              >Densità
+              <strong
+                >{{
+                  entry.latest_reading.specific_gravity.toFixed(3)
+                }}
+                SG</strong
+              ></span
+            >
+            <span
+              >Batteria
+              <strong
+                >{{ entry.latest_reading.battery.toFixed(0) }}%</strong
+              ></span
+            >
+            <span
+              >Acquisizione
+              <time
+                :datetime="
+                  new Date(entry.latest_reading.timestamp * 1000).toISOString()
+                "
+                >{{
+                  dates.format(new Date(entry.latest_reading.timestamp * 1000))
+                }}</time
+              ></span
+            >
+          </span>
+          <span v-else>Nessuna lettura registrata</span>
+          <time :datetime="entry.started_at"
+            >Avvio · {{ dates.format(new Date(entry.started_at)) }}</time
+          >
+          <time v-if="entry.ended_at" :datetime="entry.ended_at"
+            >Termine · {{ dates.format(new Date(entry.ended_at)) }}</time
+          >
         </button>
       </li>
     </ul>

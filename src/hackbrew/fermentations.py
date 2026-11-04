@@ -3,7 +3,7 @@
 import math
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from bson import ObjectId
@@ -22,11 +22,13 @@ router = APIRouter(prefix="/api/fermentations")
 
 def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
     db.fermentations.create_index(
-        "status",
-        name="one_active_fermentation",
+        "pill_id",
+        name="one_active_fermentation_per_pill",
         unique=True,
         partialFilterExpression={"status": "active"},
     )
+    if "one_active_fermentation" in db.fermentations.index_information():
+        db.fermentations.drop_index("one_active_fermentation")
 
 
 def monitoring_time() -> float:
@@ -45,51 +47,81 @@ def public_fermentation(document: dict[str, Any]) -> dict[str, Any]:
         "ended_at": datetime.fromtimestamp(document["ended_at"], UTC)
         if document["ended_at"] is not None
         else None,
+        "control_mode": "monitor_only",
     }
 
 
-def active_fermentation(db: Database[dict[str, Any]]) -> dict[str, Any] | None:
-    document = db.fermentations.find_one({"status": "active"})
-    return public_fermentation(document) if document else None
+def active_fermentations(db: Database[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        public_fermentation(document)
+        for document in db.fermentations.find({"status": "active"}).sort(
+            [("started_at", -1), ("_id", -1)]
+        )
+    ]
+
+
+def fermentation_summary(db: Database[dict[str, Any]], document: dict[str, Any]) -> dict[str, Any]:
+    query = reading_filter(document)
+    reading = db.fermentation_readings.find_one(
+        query,
+        {"_id": False, "fermentation_id": False},
+        sort=[("timestamp", -1), ("_id", -1)],
+    )
+    return {
+        **public_fermentation(document),
+        "latest_reading": reading,
+        "reading_count": db.fermentation_readings.count_documents(query),
+    }
 
 
 @router.get("")
-def list_concluded(
+def list_fermentations(
     request: Request,
     q: str = Query(default="", max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
+    status: Literal["active", "concluded"] | None = None,
 ) -> dict[str, object]:
-    query: dict[str, Any] = {"status": "concluded"}
+    query: dict[str, Any] = {"status": status} if status else {}
     if q.strip():
         query["name"] = {"$regex": re.escape(q.strip()), "$options": "i"}
     documents = list(
         database(request)
         .fermentations.find(query)
-        .sort([("ended_at", -1), ("_id", -1)])
+        .sort([("status", 1), ("ended_at", -1), ("started_at", -1), ("_id", -1)])
         .skip(offset)
         .limit(limit + 1)
     )
     return {
-        "fermentations": [public_fermentation(document) for document in documents[:limit]],
+        "fermentations": [
+            fermentation_summary(database(request), document) for document in documents[:limit]
+        ],
         "next_offset": offset + limit if len(documents) > limit else None,
     }
 
 
 @router.get("/active")
 def get_active(request: Request) -> dict[str, object]:
-    return {"fermentation": active_fermentation(database(request))}
+    fermentations = active_fermentations(database(request))
+    return {
+        "fermentations": fermentations,
+        "fermentation": fermentations[0] if len(fermentations) == 1 else None,
+    }
 
 
 @router.post("", status_code=201)
 def start_fermentation(payload: FermentationStart, request: Request) -> dict[str, object]:
     db = database(request)
     pill = require_pill(db, payload.pill_id)
-    if active_fermentation(db):
+    if db.fermentations.find_one({"status": "active", "pill_id": pill["_id"]}):
         raise HTTPException(
-            409, "C'è già una fermentazione attiva. Terminala prima di avviarne un'altra."
+            409,
+            "C'è già una fermentazione attiva per questa pillola. "
+            "Terminala prima di riutilizzarla.",
         )
-    last = db.fermentations.find_one({"status": "concluded"}, sort=[("ended_at", -1)])
+    last = db.fermentations.find_one(
+        {"status": "concluded", "pill_id": pill["_id"]}, sort=[("ended_at", -1)]
+    )
     started_at = monitoring_time()
     if last:
         started_at = max(started_at, last["ended_at"])
@@ -107,7 +139,9 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
         db.fermentations.insert_one(document)
     except DuplicateKeyError:
         raise HTTPException(
-            409, "C'è già una fermentazione attiva. Terminala prima di avviarne un'altra."
+            409,
+            "C'è già una fermentazione attiva per questa pillola. "
+            "Terminala prima di riutilizzarla.",
         ) from None
     return {"fermentation": public_fermentation(document)}
 
@@ -121,8 +155,13 @@ def require_fermentation(db: Database[dict[str, Any]], identifier: str) -> dict[
 
 @router.get("/{identifier}")
 def get_fermentation(identifier: str, request: Request) -> dict[str, object]:
+    db = database(request)
+    document = require_fermentation(db, identifier)
+    summary = fermentation_summary(db, document)
     return {
-        "fermentation": public_fermentation(require_fermentation(database(request), identifier))
+        "fermentation": public_fermentation(document),
+        "latest_reading": summary["latest_reading"],
+        "reading_count": summary["reading_count"],
     }
 
 
@@ -142,8 +181,7 @@ def end_fermentation(identifier: str, request: Request) -> dict[str, object]:
         return_document=ReturnDocument.AFTER,
     )
     if document is None:
-        require_fermentation(db, identifier)
-        raise HTTPException(409, "Questa fermentazione è già conclusa.")
+        document = require_fermentation(db, identifier)
     return {"fermentation": public_fermentation(document)}
 
 
@@ -158,21 +196,20 @@ def reading_filter(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def active_snapshot(db: Database[dict[str, Any]]) -> dict[str, object]:
-    document = db.fermentations.find_one({"status": "active"})
-    if document is None:
-        return {"fermentation": None, "fermentation_reading": None, "fermentation_reading_count": 0}
-    reading = db.fermentation_readings.find_one(
-        reading_filter(document),
-        {"_id": False, "fermentation_id": False},
-        sort=[("timestamp", -1), ("_id", -1)],
+def active_snapshot(db: Database[dict[str, Any]], pill_id: str | None = None) -> dict[str, object]:
+    documents = list(
+        db.fermentations.find({"status": "active"}).sort([("started_at", -1), ("_id", -1)])
     )
+    summaries = [fermentation_summary(db, document) for document in documents]
+    selected = next((document for document in documents if document["pill_id"] == pill_id), None)
+    if pill_id is None and len(documents) == 1:
+        selected = documents[0]
+    summary = next((row for row in summaries if selected and row["id"] == selected["_id"]), None)
     return {
-        "fermentation": public_fermentation(document),
-        "fermentation_reading": reading,
-        "fermentation_reading_count": db.fermentation_readings.count_documents(
-            reading_filter(document)
-        ),
+        "active_fermentations": summaries,
+        "fermentation": public_fermentation(selected) if selected else None,
+        "fermentation_reading": summary["latest_reading"] if summary else None,
+        "fermentation_reading_count": summary["reading_count"] if summary else 0,
     }
 
 

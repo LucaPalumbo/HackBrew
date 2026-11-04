@@ -1,8 +1,8 @@
 # HackBrew
 
-Dashboard web per registrare pillole Bluetooth e monitorare la fermentazione della birra. La pagina **Dispositivi** mostra la diagnostica live di ciascuna pillola e tutte le misure ricevute. Il monitoraggio permette di scegliere una pillola, avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Senza fermentazione attiva si può scegliere la pillola diagnostica; il pulsante **Aggiorna lettura** permette anche un recupero manuale.
+Dashboard web per registrare pillole Bluetooth e monitorare più fermentazioni della birra contemporaneamente. La pagina **Dispositivi** mostra la diagnostica live di ciascuna pillola e tutte le misure ricevute. Il monitoraggio permette di scegliere una pillola disponibile, avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Le card riassumono attive e concluse e aprono il dettaglio del ciclo scelto. È sempre possibile consultare anche la diagnostica delle pillole.
 
-Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): questo incremento consegna [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9). Rimane una sola fermentazione attiva globale; card, grafico unico, attuatori e impostazioni del timeout appartengono ai ticket successivi.
+Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9) e [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10). La regolazione con attuatori e il grafico unico appartengono ai ticket successivi.
 
 ## Requisiti e avvio
 
@@ -35,6 +35,8 @@ I dati della versione precedente non contengono l'identità della pillola. È st
 
 Il primo comando elimina intenzionalmente il volume MongoDB dichiarato del progetto selezionato, quindi tutte le vecchie fermentazioni e letture. Non usare `--volumes` nei normali riavvii. La procedura non usa prune o rimozioni globali di volumi Docker. Un database nuovo non richiede questo reset; l'applicazione non cancella dati all'avvio e rifiuta il vecchio indice delle misure con un messaggio che rimanda a questa procedura.
 
+**Se usi già la versione della #9, non eseguire un altro reset.** `./scripts/hackbrew up` aggiorna automaticamente il solo vincolo da una fermentazione attiva globale a una per pillola. Registrazioni, identificatori, cicli e letture vengono mantenuti.
+
 ## Registrare e controllare le pillole
 
 Apri **Dispositivi** dalla navigazione e inserisci **Nome della pillola** e **MAC Bluetooth**. Sono accettati `AA:BB:CC:DD:EE:FF`, `aa-bb-cc-dd-ee-ff` e `aabbccddeeff`: identificano la stessa pillola e vengono conservati nel formato con due punti maiuscolo. Un MAC già registrato restituisce un conflitto, anche con registrazioni concorrenti.
@@ -44,7 +46,7 @@ Ogni pillola mostra densità SG, temperatura °C, batteria %, velocità della de
 | Operazione | Risultato |
 | --- | --- |
 | `POST /api/pills` con `{"name":"Pillola IPA","mac":"AA:BB:CC:DD:EE:FF"}` | Registra una pillola; HTTP 201 con `pill` e identificatore stabile. |
-| `GET /api/pills` | Elenca `pills`, con identificatore, nome e MAC normalizzato. |
+| `GET /api/pills` | Elenca `pills`, con identificatore, nome, MAC normalizzato, `available` e `active_fermentation_id`. |
 | `GET /api/readings/latest?pill_id=<id>` | Restituisce l'ultima lettura della pillola richiesta; HTTP 404 per identità sconosciuta. |
 
 Il bridge corrente deve aggiungere `pill_mac` a ogni invio. L'adeguamento del bridge reale per più pillole e sincronizzazione automatica del registro è il [ticket #11](https://github.com/LucaPalumbo/HackBrew/issues/11); questo incremento può essere provato con messaggi HTTP identificati. Non attribuire un vecchio messaggio privo di MAC a una pillola scelta arbitrariamente.
@@ -110,7 +112,7 @@ Il timestamp dell'esempio è storico: il gateway reale deve usare il proprio ora
 | Operazione | Risultato |
 | --- | --- |
 | `POST /telemetry` | Salva atomicamente la lettura se è più recente e restituisce l'ultima disponibile. |
-| `GET /api/readings/latest` | Snapshot con `reading` e `pill_id` selezionati, `pills` con diagnostica e `last_received_at` per sorgente, `fermentation` attiva, `fermentation_reading`, `freshness_seconds` e `server_time`. Senza filtro sceglie la pillola attiva o, in diagnostica, la prima per nome e identificatore. |
+| `GET /api/readings/latest` | Snapshot con `reading` e `pill_id` diagnostici, `pills` con disponibilità e `last_received_at`, e `active_fermentations` con i riepiloghi di tutte le attive. I campi singolari `fermentation`/`fermentation_reading` si riferiscono alla pillola filtrata oppure all'unica attiva; senza una scelta univoca sono `null`. In diagnostica il valore predefinito è la prima pillola per nome e identificatore. Include `freshness_seconds` e `server_time`. |
 | `GET /api/readings/events` | Stream SSE: invia subito lo stato persistito e poi le variazioni dell'ultima lettura, con eventi `reading`. |
 | `GET /api/health` | Verifica che l'applicazione possa raggiungere MongoDB. |
 
@@ -118,20 +120,22 @@ Un messaggio non valido restituisce HTTP 422; una sorgente ben formata ma non re
 
 ## Avviare e terminare una fermentazione
 
-Inserisci un nome nel campo **Nome della fermentazione**, scegli esplicitamente **Pillola della fermentazione** e premi **Avvia fermentazione**. Il nome non può essere vuoto o contenere soltanto spazi. La scelta della pillola è obbligatoria e rimane fissa durante il ciclo. La dashboard mostra nome, pillola, stato e istante di avvio; fino alla prima lettura della pillola nel suo intervallo mostra un'attesa esplicita, anche se esistono letture diagnostiche precedenti o dati di altre pillole.
+Inserisci un nome nel campo **Nome della fermentazione**, scegli esplicitamente una **Pillola della fermentazione** disponibile e premi **Avvia fermentazione**. Il nome non può essere vuoto o contenere soltanto spazi. Puoi avviare altri cicli scegliendo pillole diverse: quelle già assegnate sono indicate come occupate e non sono selezionabili. La scelta della pillola rimane fissa durante il ciclo. La modalità **Solo monitoraggio** non richiede attuatori, limiti di temperatura o isteresi.
 
-Premi **Termina fermentazione** per concluderla: un messaggio conferma l'operazione, mentre nome, identificatore, avvio, termine e letture rimangono salvati. Puoi quindi avviarne un'altra, che inizierà senza ereditare le letture della precedente. Le operazioni fallite mostrano un errore e permettono di riprovare. Anche un'altra scheda del browser riceve lo stato corrente attraverso il collegamento live.
+Le card mostrano nome, stato, pillola, ultima temperatura, densità SG, batteria, orario della misura e stato di monitoraggio. Le attive sono evidenziate e precedono le concluse; ricerca per nome e paginazione permettono di consultare l'elenco completo. Ogni card apre `?fermentation=<id>`, con stato, assegnazione, istanti e letture del ciclo. Indietro/Avanti, reload e collegamenti diretti mantengono la scelta. Le letture di altri cicli aggiornano le loro card senza cambiare il dettaglio selezionato. Un ciclo nuovo mostra un'attesa esplicita, anche se la pillola aveva già dati diagnostici.
+
+Apri una card attiva e premi **Termina fermentazione** per concludere soltanto quel ciclo: un messaggio conferma l'operazione, mentre nome, identificatore, avvio, termine e letture rimangono salvati. La pillola torna disponibile e le altre fermentazioni continuano. Il termine è definitivo e ripeterlo restituisce la stessa conclusione senza cambiare l'istante. Un nuovo ciclo non eredita letture precedenti. Le operazioni fallite mostrano un errore e permettono di riprovare; anche le altre schede del browser ricevono lo stato corrente.
 
 | Operazione | Risultato |
 | --- | --- |
 | `POST /api/fermentations` con `{"name":"Prima IPA","pill_id":"<id registrato>"}` | Crea e avvia la fermentazione; HTTP 201 con `fermentation` e identità della pillola scelta. |
-| `GET /api/fermentations/active` | Restituisce `fermentation` attiva oppure `null`. |
-| `GET /api/fermentations?q=IPA&limit=20&offset=0` | Elenco delle concluse, più recenti per prime; ricerca letterale per nome senza distinzione di maiuscole. Restituisce `fermentations` e `next_offset`. Limite da 1 a 50, predefinito 20. |
-| `GET /api/fermentations/{id}` | Recupera nome, identificatore stabile, stato `active`/`concluded` e istanti UTC `started_at`/`ended_at`. |
+| `GET /api/fermentations/active` | Restituisce `fermentations`, l'elenco di tutte le attive. Il campo compatibile `fermentation` contiene l'unica attiva se è una sola, altrimenti `null`. |
+| `GET /api/fermentations?q=IPA&limit=20&offset=0` | Elenco di attive e concluse con attive prima, ricerca letterale per nome e paginazione. Ogni riepilogo include `latest_reading`, `reading_count` e `control_mode: monitor_only`. Il filtro opzionale `status=active` o `status=concluded` restringe l'elenco. Restituisce `fermentations` e `next_offset`; limite da 1 a 50, predefinito 20. |
+| `GET /api/fermentations/{id}` | Recupera nome, pillola, stato `active`/`concluded`, modalità e istanti UTC. La risposta include anche ultima lettura del ciclo e conteggio. |
 | `GET /api/fermentations/{id}/readings?limit=200` | Recupera la finestra più recente dell'intervallo in ordine di acquisizione, anche dopo il termine. Restituisce `readings` e `next_before`; limite da 1 a 200, predefinito 200. |
 | `POST /api/fermentations/{id}/end` | Conclude la fermentazione; HTTP 200 con lo stato aggiornato. |
 
-Un nuovo avvio mentre esiste una fermentazione attiva, o il termine di una già conclusa, restituisce HTTP 409 con una spiegazione. Un identificatore sconosciuto restituisce HTTP 404; un nome non valido restituisce HTTP 422. Un indice univoco parziale MongoDB sullo stato attivo impone il vincolo anche con richieste concorrenti; viene creato all'avvio dell'applicazione e rimane nel volume del database. [Riferimento MongoDB sugli indici parziali univoci](https://www.mongodb.com/docs/manual/core/index-partial/).
+Un avvio che riutilizza una pillola già occupata restituisce HTTP 409 con una spiegazione; pillole diverse possono avviarsi contemporaneamente. Un identificatore sconosciuto restituisce HTTP 404 e input non validi HTTP 422. Un indice univoco parziale MongoDB su `pill_id` per i documenti attivi impone il vincolo anche con richieste concorrenti, senza prenotazioni parziali. [Riferimento MongoDB sugli indici parziali univoci](https://www.mongodb.com/docs/manual/core/index-partial/).
 
 Le letture sono associate per **pillola e timestamp di acquisizione: avvio incluso, termine escluso**. Gli estremi dell'intervallo sono conservati come secondi Unix UTC e restituiti dalle API come date ISO 8601. I campioni sono documenti separati, associati all'identificatore della fermentazione. Fuori dagli intervalli conosciuti viene mantenuta soltanto l'ultima lettura diagnostica di ogni pillola.
 
@@ -147,7 +151,7 @@ Non è prevista una migrazione dal vecchio schema senza identità: il passaggio 
 
 Durante una fermentazione attiva, i grafici di **densità SG** e **temperatura °C** e la tabella delle letture vengono caricati da MongoDB e aggiornati quando il collegamento live segnala una nuova lettura. La tabella include anche la **batteria %** e l'orario di acquisizione. Ogni punto dei grafici Chart.js corrisponde a un campione effettivo; non vengono aggiunti valori intermedi o campioni per colmare le lacune. I grafici a punti sono accompagnati dalla tabella, accessibile anche da tastiera. [Documentazione Chart.js: grafici a punti](https://www.chartjs.org/docs/latest/charts/scatter.html), [accessibilità](https://www.chartjs.org/docs/latest/general/accessibility.html).
 
-Nel riquadro **Storico fermentazioni**, cerca un nome o scegli una fermentazione conclusa. La schermata mostra il nome, lo stato, gli istanti di avvio e termine, i grafici e i valori di quella fermentazione. Gli aggiornamenti dell'attiva non cambiano la scelta. La selezione è salvata nell'indirizzo `?fermentation=<id>`, quindi funziona anche dopo un reload, con Indietro/Avanti o riaprendo il collegamento dopo un riavvio dell'applicazione. **Monitoraggio attuale** torna all'attiva o alla lettura diagnostica. Una fermentazione senza dati ha uno stato esplicito; un caricamento fallito mostra un errore con possibilità di riprovare.
+Nel riquadro **Le tue fermentazioni**, cerca un nome o apri una card attiva o conclusa. Il dettaglio mostra stato, pillola, istanti di avvio e termine, grafici e valori di quella fermentazione. Gli aggiornamenti degli altri cicli non cambiano la scelta. La selezione è salvata nell'indirizzo `?fermentation=<id>`, quindi funziona anche dopo un reload, con Indietro/Avanti o riaprendo il collegamento dopo un riavvio dell'applicazione. **Monitoraggio attuale** torna alla panoramica e alla diagnostica; con un'unica attiva mostra anche il suo andamento. Una fermentazione senza dati ha uno stato esplicito; un caricamento fallito mostra un errore con possibilità di riprovare.
 
 Ogni finestra contiene al massimo **200 letture originali**, condivise fra grafici e tabella; non è una media o una riduzione dei dati salvati. Usa **Letture precedenti** e **Letture più recenti** per consultare altre finestre. Il live aggiorna la finestra più recente dell'attiva; mentre consulti una finestra precedente questa rimane ferma. Le liste delle concluse mostrano 20 voci per pagina e permettono di caricarne altre. Su telefono i grafici si dispongono in verticale e la tabella scorre nel proprio riquadro.
 
@@ -158,6 +162,8 @@ Per le API, passa il valore opaco `next_before` come parametro `before` alla ric
 La dashboard distingue **Nessuna lettura**, **Lettura disponibile** e **Dati non aggiornati**. L'età si riferisce all'acquisizione sul gateway, usando l'orario del server come riferimento; oltre la soglia conserva misure e orari reali. La soglia predefinita di cinque minuti è un criterio di freschezza, non la frequenza di trasmissione della pillola né una diagnosi di un dispositivo offline. L'esempio storico sopra apparirà quindi come non aggiornato.
 
 Il collegamento live ha uno stato separato. Se si interrompe, la pagina conserva i valori e segnala la riconnessione automatica. Alla ripresa riceve un nuovo stato completo da MongoDB, recuperando anche le letture perse durante l'interruzione. Il recupero HTTP fornisce anche soglia e orario del server, così la freschezza viene valutata anche quando il live non è ancora disponibile.
+
+Con risposte lente, gli aggiornamenti automatici di card e dettaglio attendono il caricamento già in corso e accodano un solo recupero successivo. Cambiare ricerca, pagina o fermentazione sostituisce invece la richiesta precedente. La navigazione resta utilizzabile e un errore non viene trasformato in un elenco vuoto mentre si attende una nuova risposta valida.
 
 Ogni connessione SSE legge MongoDB all'apertura e controlla le variazioni ogni secondo. Non usa notifiche in memoria come archivio. Gli eventi `reading` contengono lo stesso snapshot di `GET /api/readings/latest`, inclusi fermentazione e relativa lettura, soglia e `server_time` (secondi Unix). Il metadato `fermentation_reading_count`, ricavato dai campioni persistiti dell'attiva, permette di notificare anche una lettura precedente all'ultima: la tabella e i grafici si aggiornano mentre i valori correnti restano corretti. I duplicati non aumentano il conteggio. Il browser usa il riferimento del server e il tempo trascorso per aggiornare lo stato anche senza nuovi eventi. Alla riconnessione viene sempre inviato lo stato persistito corrente, anche con `Last-Event-ID`: non è uno stream dello storico. Se MongoDB diventa irraggiungibile, lo stream invia `unavailable` e si chiude per consentire un nuovo tentativo; le connessioni inattive ricevono commenti di mantenimento.
 
@@ -224,11 +230,13 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/browser/test_delivery_dashboard.py
 ./scripts/hackbrew test tests/integration/test_pills.py
 ./scripts/hackbrew test tests/browser/test_pills_dashboard.py
+./scripts/hackbrew test tests/integration/test_parallel_fermentations.py
+./scripts/hackbrew test tests/browser/test_parallel_dashboard.py
 ```
 
 La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. I test di consegna coprono invii ripetuti e concorrenti, valori distinti allo stesso timestamp, letture fuori ordine e confini tra due fermentazioni.
 
-Il controllo completo conserva fuori dall'applicazione uno snapshot JSON di pillole, fermentazioni, letture e identificatori, poi riavvia il container applicativo sullo stesso volume di test. Tutte le verifiche osservano le API e il browser: registrazioni e misure separate per pillola preservate, nuove consegne idempotenti anche concorrenti, riapertura dei grafici storici e vincolo di avvio concorrente dopo il riavvio. La vecchia prova di migrazione dei duplicati MVP è sostituita dalla verifica del nuovo schema persistente, coerentemente con il reset concordato.
+Il controllo completo conserva fuori dall'applicazione snapshot JSON e riavvia realmente l'applicazione sullo stesso volume di test in due scenari. Il primo prepara il vincolo globale della #9 e verifica la sua sostituzione con quello per pillola, senza perdere registrazioni, ciclo o letture. Il secondo salva due fermentazioni attive e una conclusa, verificando dopo il riavvio assegnazioni, misure, deduplicazione concorrente, storico browser e vincoli di riuso per pillola. Tutte le asserzioni osservano API e browser; la preparazione degli indici precedenti è confinata al solo database di test.
 
 Il controllo completo esegue inoltre la prova operativa disponibile separatamente con `./scripts/hackbrew test-recovery`. La prova crea una fermentazione conclusa e una attiva, apre monitoraggio e storico nel browser, ferma MongoDB e verifica gli errori HTTP 503, i valori conservati e un termine fallito nell'interfaccia. Ripristina MongoDB, invia una nuova acquisizione e verifica il recupero automatico dello storico; poi ferma l'applicazione e ricrea entrambi i container mantenendo il volume di test. Controlla dati persistiti, riconnessione live, nuova lettura e successivo termine manuale. I messaggi rifiutati durante i guasti non vengono ritrasmessi dal test.
 
@@ -236,7 +244,7 @@ La procedura usa soltanto un progetto `hackbrew-tests-*` e il suo volume isolato
 
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, il gateway reale, credenziali GitHub o l'accesso al volume dell'applicazione.
 
-Le prove browser salvano schermate desktop/telefono in `artifacts/`, esclusa da Git. Le immagini `pillole-1440.png` e `pillole-390.png` mostrano il registro con due pillole e diagnostiche distinte.
+Le prove browser salvano schermate desktop/telefono in `artifacts/`, esclusa da Git. Le immagini `pillole-1440.png` e `pillole-390.png` mostrano il registro; `fermentazioni-parallele-1440.png` e `fermentazioni-parallele-390.png` mostrano card e dettaglio di cicli indipendenti.
 
 ## Struttura
 

@@ -104,6 +104,11 @@ async function register() {
   >
     <h2>{{ pill.name }}</h2>
     <p class="fermentation-period">{{ pill.mac }}</p>
+    <p class="fermentation-period">
+      {{
+        pill.available ? 'Disponibile' : 'Assegnata a una fermentazione attiva'
+      }}
+    </p>
     <p v-if="!pill.reading">Nessuna lettura ricevuta.</p>
     <template v-else>
       <dl class="pill-quantities">

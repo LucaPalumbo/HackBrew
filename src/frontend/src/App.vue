@@ -4,7 +4,7 @@ import FermentationControls from './FermentationControls.vue'
 import FermentationArchive from './FermentationArchive.vue'
 import FermentationHistory from './FermentationHistory.vue'
 import PillRegistry from './PillRegistry.vue'
-import type { Fermentation } from './fermentations'
+import type { Fermentation, FermentationSummary } from './fermentations'
 import type { PillSnapshot, Reading } from './readings'
 
 type Snapshot = {
@@ -15,6 +15,7 @@ type Snapshot = {
   server_time: number
   fermentation: Fermentation | null
   fermentation_reading: Reading | null
+  active_fermentations: FermentationSummary[]
 }
 
 const devicesPage =
@@ -27,6 +28,7 @@ const diagnosticReading = computed(
     null,
 )
 const fermentation = ref<Fermentation | null>(null)
+const activeFermentations = ref<FermentationSummary[]>([])
 const fermentationReading = ref<Reading | null>(null)
 const selectedId = ref(
   new URLSearchParams(window.location.search).get('fermentation') || null,
@@ -115,6 +117,7 @@ function applySnapshot(snapshot: Snapshot) {
   if (!pills.value.some((pill) => pill.id === diagnosticPillId.value))
     diagnosticPillId.value = snapshot.pill_id ?? ''
   fermentation.value = snapshot.fermentation
+  activeFermentations.value = snapshot.active_fermentations
   fermentationReading.value = snapshot.fermentation_reading
   freshnessSeconds.value = snapshot.freshness_seconds
   clock.value = performance.now()
@@ -192,12 +195,14 @@ onUnmounted(() => {
       </nav>
       <span class="mode">{{
         selectedId
-          ? 'Storico fermentazioni'
+          ? 'Dettaglio fermentazione'
           : !hasSnapshot
             ? 'Monitoraggio non disponibile'
-            : fermentation
-              ? 'Fermentazione in corso'
-              : 'Modalità diagnostica'
+            : activeFermentations.length > 1
+              ? 'Fermentazioni in corso'
+              : fermentation
+                ? 'Fermentazione in corso'
+                : 'Modalità diagnostica'
       }}</span>
     </header>
 
@@ -244,6 +249,7 @@ onUnmounted(() => {
         :recovery-revision="recoveryRevision"
         :selected-id="selectedId"
         :active-id="fermentation?.id ?? null"
+        :revision="historyRevision"
         @select="selectFermentation"
       />
       <FermentationControls
@@ -251,6 +257,7 @@ onUnmounted(() => {
         :fermentation="fermentation"
         :loading="isLoading"
         :pills="pills"
+        allow-start
         @changed="loadLatest"
       />
       <p v-if="error && !selectedId" class="error" role="alert">{{ error }}</p>
@@ -398,16 +405,19 @@ onUnmounted(() => {
         :identifier="selectedId ?? fermentation?.id ?? null"
         :revision="historyRevision"
         :live="!selectedId"
+        @changed="loadLatest"
       />
       <footer class="footnote">
         <span>{{
           selectedId
-            ? 'Consultazione storico'
+            ? 'Consultazione fermentazione'
             : !hasSnapshot
               ? 'Stato della fermentazione non disponibile'
-              : fermentation
-                ? `Fermentazione attiva: ${fermentation.name}`
-                : 'Nessuna fermentazione attiva'
+              : activeFermentations.length > 1
+                ? `${activeFermentations.length} fermentazioni attive`
+                : fermentation
+                  ? `Fermentazione attiva: ${fermentation.name}`
+                  : 'Nessuna fermentazione attiva'
         }}</span>
         <span>{{
           selectedId

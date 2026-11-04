@@ -8,7 +8,10 @@ from tests.payloads import fermentation_payload, gateway_lettura
 
 
 def test_named_fermentazione_starts_and_is_recovered_from_the_api(api: httpx.Client) -> None:
-    assert api.get("/api/fermentations/active").json() == {"fermentation": None}
+    assert api.get("/api/fermentations/active").json() == {
+        "fermentation": None,
+        "fermentations": [],
+    }
     before = datetime.now(UTC)
     response = api.post("/api/fermentations", json=fermentation_payload(api, "  Prima IPA  "))
 
@@ -49,7 +52,7 @@ def test_ending_preserves_fermentazione_and_frees_the_active_slot(api: httpx.Cli
     assert datetime.fromisoformat(ended["ended_at"]) >= datetime.fromisoformat(first["started_at"])
     assert api.get("/api/fermentations/active").json()["fermentation"] is None
     assert api.get(f"/api/fermentations/{first['id']}").json()["fermentation"] == ended
-    assert api.post(f"/api/fermentations/{first['id']}/end").status_code == 409
+    assert api.post(f"/api/fermentations/{first['id']}/end").status_code == 200
     assert api.get(f"/api/fermentations/{first['id']}").json()["fermentation"] == ended
 
     response = api.post("/api/fermentations", json=fermentation_payload(api, "Seconda IPA"))

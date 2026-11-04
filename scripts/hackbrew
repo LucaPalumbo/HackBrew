@@ -53,10 +53,12 @@ case "$action" in
             docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests pytest "$@"
         fi
         if [ "$action" = test ] && [ "$#" -eq 0 ]; then
-            hackbrew_restart_state=$(docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm -T tests python -m tests.check_restart seed)
-            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml restart app
-            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
-            printf '%s\n' "$hackbrew_restart_state" | docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm -T tests python -m tests.check_restart verify
+            for hackbrew_restart_phase in upgrade persistence; do
+                hackbrew_restart_state=$(docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm -T tests python -m tests.check_restart "$hackbrew_restart_phase-seed")
+                docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml restart app
+                docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
+                printf '%s\n' "$hackbrew_restart_state" | docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm -T tests python -m tests.check_restart "$hackbrew_restart_phase-verify"
+            done
         fi
         if [ "$action" = test-recovery ] || [ "$#" -eq 0 ]; then
             "$project_root/scripts/check-recovery" "$hackbrew_tests_project"

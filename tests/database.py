@@ -22,3 +22,15 @@ def reset_test_database() -> None:
     with isolated_database() as db:
         for collection in db.list_collection_names():
             db[collection].delete_many({})
+
+
+def arrange_single_active_index() -> None:
+    """Arrange the #9 constraint; the upgrade is verified through public HTTP."""
+    with isolated_database() as db:
+        db.fermentations.create_index(
+            "status",
+            name="one_active_fermentation",
+            unique=True,
+            partialFilterExpression={"status": "active"},
+        )
+        db.fermentations.drop_index("one_active_fermentation_per_pill")
