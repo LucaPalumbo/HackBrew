@@ -1,0 +1,401 @@
+{
+  "status": "published-and-verified",
+  "repository": "LucaPalumbo/HackBrew",
+  "parent": {
+    "number": 8,
+    "url": "https://github.com/LucaPalumbo/HackBrew/issues/8",
+    "title": "[Spec] Gestire pillole, dispositivi termici e fermentazioni parallele",
+    "state": "OPEN",
+    "labels": [
+      "ready-for-agent"
+    ],
+    "body_length": 40703
+  },
+  "label": "ready-for-agent",
+  "approval": "approved-by-user",
+  "tickets": [
+    {
+      "id": "T1",
+      "title": "Registrare pillole e distinguere tutte le letture per sorgente",
+      "body_file": "01-pillole-e-letture-identificate.md",
+      "blocked_by": [],
+      "parent_user_stories": [
+        1,
+        2,
+        3,
+        9,
+        10,
+        11,
+        12,
+        54,
+        57,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "issue_number": 9,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/9",
+      "blocking_issue_numbers": [],
+      "published_body_file": "published/01-pillole-e-letture-identificate.md",
+      "acceptance_criteria": 10
+    },
+    {
+      "id": "T2",
+      "title": "Monitorare fermentazioni parallele con card e dettaglio",
+      "body_file": "02-fermentazioni-parallele-e-card.md",
+      "blocked_by": [
+        "T1"
+      ],
+      "parent_user_stories": [
+        6,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        28,
+        42,
+        44,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        65,
+        66,
+        67,
+        68,
+        70,
+        71
+      ],
+      "issue_number": 10,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/10",
+      "blocking_issue_numbers": [
+        9
+      ],
+      "published_body_file": "published/02-fermentazioni-parallele-e-card.md",
+      "acceptance_criteria": 10
+    },
+    {
+      "id": "T3",
+      "title": "Collegare tutte le pillole con un bridge sincronizzato automaticamente",
+      "body_file": "03-bridge-unico-e-sincronizzazione.md",
+      "blocked_by": [
+        "T1"
+      ],
+      "parent_user_stories": [
+        7,
+        8,
+        9,
+        54,
+        67,
+        70,
+        71
+      ],
+      "issue_number": 11,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/11",
+      "blocking_issue_numbers": [
+        9
+      ],
+      "published_body_file": "published/03-bridge-unico-e-sincronizzazione.md",
+      "acceptance_criteria": 9
+    },
+    {
+      "id": "T4",
+      "title": "Visualizzare tutte le misure in un grafico unico a linee",
+      "body_file": "04-grafico-unico-tutte-le-misure.md",
+      "blocked_by": [
+        "T2"
+      ],
+      "parent_user_stories": [
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        65,
+        66,
+        70,
+        71
+      ],
+      "issue_number": 12,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/12",
+      "blocking_issue_numbers": [
+        10
+      ],
+      "published_body_file": "published/04-grafico-unico-tutte-le-misure.md",
+      "acceptance_criteria": 8
+    },
+    {
+      "id": "T5",
+      "title": "Esplorare intervalli e zoom senza perdere il live",
+      "body_file": "05-intervalli-zoom-e-live.md",
+      "blocked_by": [
+        "T4"
+      ],
+      "parent_user_stories": [
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        70,
+        71
+      ],
+      "issue_number": 13,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/13",
+      "blocking_issue_numbers": [
+        12
+      ],
+      "published_body_file": "published/05-intervalli-zoom-e-live.md",
+      "acceptance_criteria": 9
+    },
+    {
+      "id": "T6",
+      "title": "Registrare dispositivi termici e verificarne lo stato tramite HTTP",
+      "body_file": "06-dispositivi-termici-e-contratto-http.md",
+      "blocked_by": [
+        "T1"
+      ],
+      "parent_user_stories": [
+        4,
+        5,
+        6,
+        35,
+        40,
+        41,
+        70,
+        71
+      ],
+      "issue_number": 14,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/14",
+      "blocking_issue_numbers": [
+        9
+      ],
+      "published_body_file": "published/06-dispositivi-termici-e-contratto-http.md",
+      "acceptance_criteria": 9
+    },
+    {
+      "id": "T7",
+      "title": "Configurare e sincronizzare il timeout globale simmetrico",
+      "body_file": "07-timeout-globale-simmetrico.md",
+      "blocked_by": [
+        "T6"
+      ],
+      "parent_user_stories": [
+        29,
+        30,
+        31,
+        32,
+        68,
+        70,
+        71
+      ],
+      "issue_number": 15,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/15",
+      "blocking_issue_numbers": [
+        14
+      ],
+      "published_body_file": "published/07-timeout-globale-simmetrico.md",
+      "acceptance_criteria": 9
+    },
+    {
+      "id": "T8",
+      "title": "Regolare il riscaldamento e terminare definitivamente la fermentazione",
+      "body_file": "08-riscaldamento-e-spegnimento-definitivo.md",
+      "blocked_by": [
+        "T2",
+        "T7"
+      ],
+      "parent_user_stories": [
+        6,
+        18,
+        19,
+        20,
+        21,
+        22,
+        25,
+        28,
+        30,
+        31,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        49,
+        68,
+        70,
+        71
+      ],
+      "issue_number": 16,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/16",
+      "blocking_issue_numbers": [
+        10,
+        15
+      ],
+      "published_body_file": "published/08-riscaldamento-e-spegnimento-definitivo.md",
+      "acceptance_criteria": 11
+    },
+    {
+      "id": "T9",
+      "title": "Regolare raffreddamento e dispositivi combinati senza sovrapposizioni",
+      "body_file": "09-raffreddamento-e-dispositivi-combinati.md",
+      "blocked_by": [
+        "T8"
+      ],
+      "parent_user_stories": [
+        5,
+        18,
+        19,
+        21,
+        23,
+        24,
+        25,
+        31,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        43,
+        44,
+        45,
+        46,
+        49,
+        68,
+        70,
+        71
+      ],
+      "issue_number": 17,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/17",
+      "blocking_issue_numbers": [
+        16
+      ],
+      "published_body_file": "published/09-raffreddamento-e-dispositivi-combinati.md",
+      "acceptance_criteria": 9
+    },
+    {
+      "id": "T10",
+      "title": "Modificare fascia termica e consultare lo storico delle impostazioni",
+      "body_file": "10-modifica-fascia-e-storico-impostazioni.md",
+      "blocked_by": [
+        "T8"
+      ],
+      "parent_user_stories": [
+        20,
+        21,
+        26,
+        27,
+        28,
+        38,
+        40,
+        44,
+        68,
+        70,
+        71
+      ],
+      "issue_number": 18,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/18",
+      "blocking_issue_numbers": [
+        16
+      ],
+      "published_body_file": "published/10-modifica-fascia-e-storico-impostazioni.md",
+      "acceptance_criteria": 8
+    },
+    {
+      "id": "T11",
+      "title": "Riprendere monitoraggio e regolazione dopo guasti e riavvii",
+      "body_file": "11-ripresa-integrata-e-verifica-operativa.md",
+      "blocked_by": [
+        "T3",
+        "T5",
+        "T9",
+        "T10"
+      ],
+      "parent_user_stories": [
+        7,
+        8,
+        9,
+        13,
+        24,
+        27,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        51,
+        52,
+        62,
+        63,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "issue_number": 19,
+      "issue_url": "https://github.com/LucaPalumbo/HackBrew/issues/19",
+      "blocking_issue_numbers": [
+        11,
+        13,
+        17,
+        18
+      ],
+      "published_body_file": "published/11-ripresa-integrata-e-verifica-operativa.md",
+      "acceptance_criteria": 10
+    }
+  ],
+  "native_sub_issues_supported": true,
+  "native_dependencies_supported": true,
+  "verified": {
+    "bodies_and_labels": true,
+    "native_dependencies": true,
+    "native_parent_links": true,
+    "parent_body_title_state_labels_comments_unchanged": true
+  },
+  "initial_frontier": [
+    9
+  ],
+  "total_acceptance_criteria": 102
+}
