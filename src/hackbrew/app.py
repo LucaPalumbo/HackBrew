@@ -25,6 +25,8 @@ from hackbrew.models import GatewayReading
 from hackbrew.pills import initialize_pills, pill_snapshots
 from hackbrew.pills import router as pills_router
 from hackbrew.storage import database
+from hackbrew.thermal_devices import initialize_thermal_devices
+from hackbrew.thermal_devices import router as thermal_devices_router
 
 
 @asynccontextmanager
@@ -41,6 +43,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     ) as client:
         application.state.database = client[os.environ.get("MONGODB_DATABASE", "hackbrew")]
         initialize_pills(application.state.database)
+        initialize_thermal_devices(application.state.database)
         initialize_fermentations(application.state.database)
         initialize_history(application.state.database)
         yield
@@ -50,6 +53,7 @@ app = FastAPI(title="HackBrew", lifespan=lifespan)
 app.include_router(fermentations_router)
 app.include_router(pills_router)
 app.include_router(bridge_router)
+app.include_router(thermal_devices_router)
 
 
 @app.exception_handler(RequestValidationError)

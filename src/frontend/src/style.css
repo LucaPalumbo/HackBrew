@@ -15,6 +15,19 @@
   color-scheme: light;
 }
 
+.thermal-registry {
+  margin-top: 36px;
+}
+.thermal-registry .description {
+  margin-bottom: 20px;
+}
+.thermal-state {
+  font-weight: 700;
+}
+.thermal-address {
+  overflow-wrap: anywhere;
+}
+
 * {
   box-sizing: border-box;
 }

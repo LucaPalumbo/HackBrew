@@ -46,6 +46,21 @@ services:
       RUFF_CACHE_DIR: /tmp/ruff-cache
       MYPY_CACHE_DIR: /tmp/mypy-cache
 
+  thermal-simulator:
+    profiles: [tools]
+    build:
+      context: .
+      target: thermal-simulator
+    ports:
+      - "127.0.0.1:${HACKBREW_SIMULATOR_PORT:-8081}:8000"
+    environment:
+      THERMAL_SIM_CAPABILITY: ${HACKBREW_SIMULATOR_CAPABILITY:-both}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
   frontend:
     profiles: [tools, dev]
     build:

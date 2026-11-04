@@ -96,6 +96,13 @@ def verify_database_outage(
         ("POST", "/api/pills", {"name": "Non registrata", "mac": "11:22:33:44:55:66"}),
         ("POST", f"/api/fermentations/{expected['active']['id']}/end", None),
         ("GET", "/api/readings/latest", None),
+        ("GET", "/api/thermal-devices", None),
+        (
+            "POST",
+            "/api/thermal-devices",
+            {"name": "Non salvato", "capability": "both", "base_url": "http://thermal-both:8000"},
+        ),
+        ("POST", "/api/thermal-devices/unknown/check", None),
         ("GET", "/api/fermentations/active", None),
         ("GET", f"/api/fermentations/{expected['closed']['id']}", None),
         ("GET", f"/api/fermentations/{expected['closed']['id']}/readings", None),

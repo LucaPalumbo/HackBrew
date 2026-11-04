@@ -55,7 +55,7 @@ async function register() {
       <p class="eyebrow">Le tue pillole</p>
       <h1>Dispositivi</h1>
       <p class="description">
-        Registra le pillole e controlla le loro letture.
+        Registra le pillole e i dispositivi termici, controlla letture e stato.
       </p>
     </div>
   </div>

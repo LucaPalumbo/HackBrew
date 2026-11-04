@@ -1,4 +1,32 @@
+x-thermal-simulator: &thermal-simulator
+  build:
+    context: .
+    target: thermal-simulator
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+    interval: 2s
+    timeout: 5s
+    retries: 20
+
 services:
+  thermal-heating:
+    <<: *thermal-simulator
+    environment:
+      THERMAL_SIM_CAPABILITY: heating
+      THERMAL_SIM_DEVICE_ID: simulator-heating
+
+  thermal-cooling:
+    <<: *thermal-simulator
+    environment:
+      THERMAL_SIM_CAPABILITY: cooling
+      THERMAL_SIM_DEVICE_ID: simulator-cooling
+
+  thermal-both:
+    <<: *thermal-simulator
+    environment:
+      THERMAL_SIM_CAPABILITY: both
+      THERMAL_SIM_DEVICE_ID: simulator-both
+
   mongo:
     image: mongo:8.0@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
     volumes:
@@ -48,6 +76,12 @@ services:
       - ./artifacts:/artifacts:z
     depends_on:
       app:
+        condition: service_healthy
+      thermal-heating:
+        condition: service_healthy
+      thermal-cooling:
+        condition: service_healthy
+      thermal-both:
         condition: service_healthy
     shm_size: 1gb
 

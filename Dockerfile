@@ -25,6 +25,10 @@ FROM tools AS backend-dev
 COPY src/hackbrew/ src/hackbrew/
 CMD ["uvicorn", "hackbrew.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
+FROM backend-base AS thermal-simulator
+COPY src/hackbrew/ src/hackbrew/
+CMD ["uvicorn", "hackbrew.thermal_simulator:app", "--host", "0.0.0.0", "--port", "8000"]
+
 FROM tools AS browser-deps
 RUN python -m playwright install --with-deps --only-shell chromium
 

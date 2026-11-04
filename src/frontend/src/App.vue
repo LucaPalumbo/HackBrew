@@ -4,6 +4,7 @@ import FermentationControls from './FermentationControls.vue'
 import FermentationArchive from './FermentationArchive.vue'
 import FermentationHistory from './FermentationHistory.vue'
 import PillRegistry from './PillRegistry.vue'
+import ThermalDeviceRegistry from './ThermalDeviceRegistry.vue'
 import type { Fermentation, FermentationSummary } from './fermentations'
 import type { PillSnapshot, Reading } from './readings'
 
@@ -214,6 +215,7 @@ onUnmounted(() => {
         @changed="loadLatest"
       />
       <p class="connection-status" role="status">{{ connectionStatus }}</p>
+      <ThermalDeviceRegistry />
     </main>
     <main v-else>
       <div class="intro">

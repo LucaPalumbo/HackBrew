@@ -115,10 +115,29 @@ def seed(api: httpx.Client) -> dict[str, Any]:
             "readings"
         ],
     }
+    for capability in ("heating", "cooling", "both"):
+        response = api.post(
+            "/api/thermal-devices",
+            json={
+                "name": f"Persistenza {capability}",
+                "capability": capability,
+                "base_url": f"http://thermal-{capability}:8000",
+            },
+        )
+        response.raise_for_status()
+        identifier = response.json()["device"]["id"]
+        assert (
+            api.post(f"/api/thermal-devices/{identifier}/check").json()["device"][
+                "verification_status"
+            ]
+            == "confirmed"
+        )
+    expected["thermal_devices"] = api.get("/api/thermal-devices").json()["devices"]
     return expected
 
 
 def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
+    assert api.get("/api/thermal-devices").json()["devices"] == expected["thermal_devices"]
     assert api.get("/api/pills").json()["pills"] == expected["pills"]
     assert api.get("/api/bridge/pills").json() == expected["bridge_registry"]
     assert (

@@ -2,7 +2,7 @@
 
 Dashboard web per registrare pillole Bluetooth e monitorare più fermentazioni della birra contemporaneamente. La pagina **Dispositivi** mostra la diagnostica live di ciascuna pillola e tutte le misure ricevute. Il monitoraggio permette di scegliere una pillola disponibile, avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Le card riassumono attive e concluse e aprono il dettaglio del ciclo scelto. È sempre possibile consultare anche la diagnostica delle pillole.
 
-Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9) e [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10). La regolazione con attuatori e il grafico unico appartengono ai ticket successivi.
+Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9), [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10) e [registrazione e verifica dei dispositivi termici](https://github.com/LucaPalumbo/HackBrew/issues/14). La regolazione con attuatori e il grafico unico appartengono ai ticket successivi.
 
 ## Requisiti e avvio
 
@@ -57,6 +57,22 @@ Il [bridge reale aggiornato](https://github.com/LucaPalumbo/RaptPillGateway-ble-
 
 ## Configurazione
 
+### Dispositivi termici
+
+La pagina **Dispositivi** permette anche di registrare nome, funzioni (**Riscaldamento**, **Raffreddamento** o entrambe) e indirizzo HTTP(S) dei dispositivi termici. L'indirizzo deve essere raggiungibile dal backend, senza credenziali, query o frammenti. **Verifica collegamento** legge lo stato effettivo, capacità e timeout/revisione applicati; un errore mostra **Stato sconosciuto**, conservando separatamente l'ultima conferma precedente. Registrazione e verifica non inviano comandi di accensione.
+
+`GET/POST /api/thermal-devices` elencano e registrano i dispositivi; `POST /api/thermal-devices/{id}/check` ne verifica il collegamento. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout del dispositivo parte da tre ore; configurazione globale e regolazione saranno abilitate rispettivamente dalla #15 e dalla #16.
+
+Per provare la pagina con un dispositivo simulato opzionale:
+
+```sh
+./scripts/hackbrew simulator
+```
+
+Registra **`http://thermal-simulator:8000`** come indirizzo del dispositivo, con entrambe le funzioni. L'API del simulatore è disponibile sull'host a `http://localhost:8081`; `down` lo arresta. Non è un servizio obbligatorio per l'applicazione. Le prove del simulatore non certificano hardware reale e non implementano firmware.
+
+### Impostazioni locali
+
 Le impostazioni predefinite funzionano senza un file di configurazione locale. Per cambiarle, copia `.env.example` in `.env` e modifica i valori:
 
 | Variabile | Valore predefinito | Significato |
@@ -66,8 +82,12 @@ Le impostazioni predefinite funzionano senza un file di configurazione locale. P
 | `HACKBREW_FRONTEND_PORT` | `5173` | Porta Vite in sviluppo. |
 | `MONGODB_DATABASE` | `hackbrew` | Database dell'applicazione. |
 | `HACKBREW_FRESHNESS_SECONDS` | `300` | Età massima della lettura, in secondi interi positivi, prima di segnalare dati non aggiornati. |
+| `HACKBREW_SIMULATOR_PORT` | `8081` | Porta host del simulatore opzionale, pubblicata solo su loopback. |
+| `HACKBREW_SIMULATOR_CAPABILITY` | `both` | Funzioni del simulatore opzionale: `heating`, `cooling` o `both`. |
 
 Dopo aver modificato `.env`, esegui nuovamente `./scripts/hackbrew up` per applicare la configurazione.
+
+Per applicare modifiche alle sole impostazioni del simulatore usa `./scripts/hackbrew simulator`.
 
 Il gateway deve inviare le letture all'indirizzo raggiungibile del computer che esegue HackBrew, usando l'operazione `POST /telemetry`. Se gira sullo stesso computer, la destinazione predefinita è `http://localhost:8080/telemetry`. Per un gateway su un altro computer della rete locale, configura indirizzo di ascolto e destinazione in modo coerente.
 
@@ -237,6 +257,8 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/integration/test_parallel_fermentations.py
 ./scripts/hackbrew test tests/browser/test_parallel_dashboard.py
 ./scripts/hackbrew test tests/integration/test_bridge.py tests/browser/test_bridge_dashboard.py
+./scripts/hackbrew test tests/integration/test_thermal_devices.py tests/integration/test_thermal_contract.py
+./scripts/hackbrew test tests/browser/test_thermal_devices_dashboard.py
 ```
 
 La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. I test di consegna coprono invii ripetuti e concorrenti, valori distinti allo stesso timestamp, letture fuori ordine e confini tra due fermentazioni.
