@@ -14,21 +14,19 @@ def test_active_charts_and_table_update_with_real_letture(
     api.post("/api/fermentations", json=fermentation_payload(api, "IPA live")).raise_for_status()
     page.set_viewport_size({"width": width, "height": height})
     page.goto(str(api.base_url))
-    expect(
-        page.get_by_text("I grafici appariranno alla prima lettura.", exact=True)
-    ).to_be_visible()
+    expect(page.get_by_text("Il grafico apparirà alla prima lettura.", exact=True)).to_be_visible()
     assert (
         api.post(
             "/telemetry", json=gateway_lettura(timestamp=datetime.now(UTC).timestamp())
         ).status_code
         == 200
     )
-    expect(page.get_by_role("img", name="Densità SG: 1 lettura")).to_be_visible()
-    expect(page.get_by_role("img", name="Temperatura °C: 1 lettura")).to_be_visible()
+    expect(page.get_by_role("img", name="Grafico a linee: 1 lettura")).to_be_visible()
+    expect(page.get_by_role("img")).to_have_count(1)
     table = page.get_by_role("table", name="Letture della fermentazione")
-    expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
-    expect(table.get_by_role("cell", name="19,7", exact=True)).to_be_visible()
-    expect(table.get_by_role("cell", name="63", exact=True)).to_be_visible()
+    expect(table.get_by_role("cell", name="1.050125", exact=True)).to_be_visible()
+    expect(table.get_by_role("cell", name="19,6875", exact=True)).to_be_visible()
+    expect(table.get_by_role("cell", name="63,2734375", exact=True)).to_be_visible()
 
     assert (
         api.post(
@@ -42,8 +40,8 @@ def test_active_charts_and_table_update_with_real_letture(
         ).status_code
         == 200
     )
-    expect(page.get_by_role("img", name="Densità SG: 2 letture")).to_be_visible()
-    expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
+    expect(page.get_by_role("img", name="Grafico a linee: 2 letture")).to_be_visible()
+    expect(table.get_by_role("cell", name="1.040125", exact=True)).to_be_visible()
     expect(table.get_by_role("row")).to_have_count(3)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 

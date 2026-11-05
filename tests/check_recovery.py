@@ -144,7 +144,7 @@ def verify_database_outage(
     ).to_be_visible(timeout=20000)
     expect(
         archive.get_by_role("table", name="Letture della fermentazione").get_by_role(
-            "cell", name="1.060", exact=True
+            "cell", name="1.060125", exact=True
         )
     ).to_be_visible()
     expect(archive.get_by_role("alert")).to_have_count(0)

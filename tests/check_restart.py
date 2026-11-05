@@ -204,15 +204,15 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
         expect(
             page.get_by_role("heading", name="Storico: Persistenza conclusa", exact=True)
         ).to_be_visible()
-        expect(page.get_by_role("img", name="Densità SG: 1 lettura")).to_be_visible()
+        expect(page.get_by_role("img", name="Grafico a linee: 1 lettura")).to_be_visible()
         table = page.get_by_role("table", name="Letture della fermentazione")
-        expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
-        expect(table.get_by_role("cell", name="63", exact=True)).to_be_visible()
+        expect(table.get_by_role("cell", name="1.040125", exact=True)).to_be_visible()
+        expect(table.get_by_role("cell", name="63,2734375", exact=True)).to_be_visible()
         page.reload()
         expect(
             page.get_by_role("heading", name="Storico: Persistenza conclusa", exact=True)
         ).to_be_visible()
-        expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
+        expect(table.get_by_role("cell", name="1.040125", exact=True)).to_be_visible()
         browser.close()
 
     assert api.post(f"/api/fermentations/{expected['active']['id']}/end").status_code == 200

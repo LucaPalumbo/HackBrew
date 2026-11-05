@@ -5,6 +5,7 @@ import FermentationControls from './FermentationControls.vue'
 import type { Fermentation } from './fermentations'
 import type { Reading } from './readings'
 import { useLatestRequest } from './useLatestRequest'
+import { measurements, exactMeasurement } from './measurements'
 
 const props = defineProps<{
   identifier: string | null
@@ -186,7 +187,7 @@ watch(
     <p v-if="fermentation && !readings.length && !loading && !error">
       {{
         live
-          ? 'I grafici appariranno alla prima lettura.'
+          ? 'Il grafico apparirà alla prima lettura.'
           : 'Nessuna lettura registrata per questa fermentazione.'
       }}
     </p>
@@ -201,21 +202,11 @@ watch(
         {{ latest.battery.toFixed(0) }}% batteria
       </p>
       <p class="history-period">
-        Ogni punto è una lettura acquisita; gli intervalli senza campioni
-        restano senza punti.
+        Le linee collegano le letture disponibili, anche distanti nel tempo.
+        Ogni punto è un campione acquisito; nessun valore intermedio viene
+        aggiunto alle letture.
       </p>
-      <div class="charts">
-        <MeasurementChart
-          :readings="readings"
-          metric="specific_gravity"
-          label="Densità SG"
-        />
-        <MeasurementChart
-          :readings="readings"
-          metric="temperature"
-          label="Temperatura °C"
-        />
-      </div>
+      <MeasurementChart :readings="readings" />
       <div class="history-navigation">
         <button
           class="text-button"
@@ -244,9 +235,9 @@ watch(
           <thead>
             <tr>
               <th scope="col">Acquisizione</th>
-              <th scope="col">Densità SG</th>
-              <th scope="col">Temperatura °C</th>
-              <th scope="col">Batteria %</th>
+              <th v-for="metric in measurements" :key="metric.key" scope="col">
+                {{ metric.label }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -259,10 +250,13 @@ watch(
                   :datetime="new Date(reading.timestamp * 1000).toISOString()"
                   >{{ dates.format(new Date(reading.timestamp * 1000)) }}</time
                 >
+                <span class="exact-timestamp"
+                  >Unix: {{ reading.timestamp }}</span
+                >
               </td>
-              <td>{{ reading.specific_gravity.toFixed(3) }}</td>
-              <td>{{ temperatures.format(reading.temperature) }}</td>
-              <td>{{ reading.battery.toFixed(0) }}</td>
+              <td v-for="metric in measurements" :key="metric.key">
+                {{ exactMeasurement(reading, metric.key) }}
+              </td>
             </tr>
           </tbody>
         </table>

@@ -2,7 +2,7 @@
 
 Dashboard web per registrare pillole Bluetooth e monitorare più fermentazioni della birra contemporaneamente. La pagina **Dispositivi** mostra la diagnostica live di ciascuna pillola e tutte le misure ricevute. Il monitoraggio permette di scegliere una pillola disponibile, avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Le card riassumono attive e concluse e aprono il dettaglio del ciclo scelto. È sempre possibile consultare anche la diagnostica delle pillole.
 
-Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9), [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10) e [registrazione e verifica dei dispositivi termici](https://github.com/LucaPalumbo/HackBrew/issues/14). La regolazione con attuatori e il grafico unico appartengono ai ticket successivi.
+Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9), [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10) e [registrazione e verifica dei dispositivi termici](https://github.com/LucaPalumbo/HackBrew/issues/14). Il [grafico unico a linee](https://github.com/LucaPalumbo/HackBrew/issues/12) mostra tutte le misure; regolazione con attuatori e navigazione temporale avanzata appartengono ai ticket successivi.
 
 ## Requisiti e avvio
 
@@ -171,13 +171,19 @@ Una lettura consegnata in ritardo viene salvata nell'intervallo in cui è stata 
 
 Non è prevista una migrazione dal vecchio schema senza identità: il passaggio deliberato descritto sopra parte da un dataset pulito. Gli avvii ordinari del nuovo schema preservano registrazioni, campioni e indici.
 
-## Grafici e storico
+## Grafico e storico
 
-Durante una fermentazione attiva, i grafici di **densità SG** e **temperatura °C** e la tabella delle letture vengono caricati da MongoDB e aggiornati quando il collegamento live segnala una nuova lettura. La tabella include anche la **batteria %** e l'orario di acquisizione. Ogni punto dei grafici Chart.js corrisponde a un campione effettivo; non vengono aggiunti valori intermedi o campioni per colmare le lacune. I grafici a punti sono accompagnati dalla tabella, accessibile anche da tastiera. [Documentazione Chart.js: grafici a punti](https://www.chartjs.org/docs/latest/charts/scatter.html), [accessibilità](https://www.chartjs.org/docs/latest/general/accessibility.html).
+Il dettaglio e l'andamento live mostrano **un unico grafico grande a linee**, caricato dalle letture persistite. Le sette serie sono inizialmente visibili: temperatura °C, densità SG, batteria %, velocità della densità in punti SG/giorno e accelerazioni X/Y/Z. Gli assi degli accelerometri condividono la stessa scala, con **unità non specificata**; le altre unità usano scale indipendenti. [Documentazione Chart.js: grafici a linee](https://www.chartjs.org/docs/latest/charts/line.html).
+
+La legenda usa controlli selezionabili anche da tastiera: mostra/nasconde ogni serie senza modificare le letture o la tabella. Colori, tratteggi e marcatori distinguono i tracciati. Su telefono, **Scala graduata** sceglie l'asse numerico da leggere mentre tutte le serie mantengono le proprie scale indipendenti; nascondere quella misura seleziona una scala ancora visibile. Disattivare tutte le serie mostra un messaggio esplicito. Toccare o passare sul grafico mostra i valori di un singolo campione originale, con unità e istante di acquisizione; campioni diversi con lo stesso timestamp rimangono distinti.
+
+L'asse orizzontale usa il timestamp di acquisizione. Le linee collegano i campioni disponibili anche quando distanti nel tempo o quando mancano quantità opzionali intermedie: non ci sono interruzioni automatiche, evidenziazioni dei gap o nuovi campioni sintetici. La rappresentazione usa segmenti rettilinei tra punti reali. `valid=false` rende indisponibile soltanto la velocità della densità, conservando gli altri valori. Le quantità mancanti non diventano zero.
+
+La tabella accessibile contiene tutte e sette le quantità **senza arrotondarne il valore originale**, insieme all'orario e al timestamp Unix esatto. La densità mantiene almeno tre decimali senza eliminarne quelli ulteriori. Velocità non valida e campi mancanti hanno diciture esplicite di indisponibilità. La tabella scorre nel proprio riquadro, anche da tastiera, senza allargare la pagina. I riepiloghi delle card possono continuare a usare valori arrotondati.
 
 Nel riquadro **Le tue fermentazioni**, cerca un nome o apri una card attiva o conclusa. Il dettaglio mostra stato, pillola, istanti di avvio e termine, grafici e valori di quella fermentazione. Gli aggiornamenti degli altri cicli non cambiano la scelta. La selezione è salvata nell'indirizzo `?fermentation=<id>`, quindi funziona anche dopo un reload, con Indietro/Avanti o riaprendo il collegamento dopo un riavvio dell'applicazione. **Monitoraggio attuale** torna alla panoramica e alla diagnostica; con un'unica attiva mostra anche il suo andamento. Una fermentazione senza dati ha uno stato esplicito; un caricamento fallito mostra un errore con possibilità di riprovare.
 
-Ogni finestra contiene al massimo **200 letture originali**, condivise fra grafici e tabella; non è una media o una riduzione dei dati salvati. Usa **Letture precedenti** e **Letture più recenti** per consultare altre finestre. Il live aggiorna la finestra più recente dell'attiva; mentre consulti una finestra precedente questa rimane ferma. Le liste delle concluse mostrano 20 voci per pagina e permettono di caricarne altre. Su telefono i grafici si dispongono in verticale e la tabella scorre nel proprio riquadro.
+Ogni finestra contiene al massimo **200 letture originali**, condivise fra grafico e tabella; non è una media o una riduzione dei dati salvati. Usa **Letture precedenti** e **Letture più recenti** per consultare altre finestre. Il live aggiorna la finestra più recente dell'attiva; mentre consulti una finestra precedente questa rimane ferma. Le serie selezionate sono mantenute durante aggiornamenti live e cambi di finestra; aprire un'altra fermentazione riparte dalle sette serie visibili. Le liste delle concluse mostrano 20 voci per pagina e permettono di caricarne altre. Zoom e navigazione temporale avanzata appartengono al ticket successivo.
 
 Per le API, passa il valore opaco `next_before` come parametro `before` alla richiesta successiva, mantenendo lo stesso identificatore di fermentazione. Il cursore distingue anche campioni con lo stesso timestamp; ogni pagina è ordinata per acquisizione e conserva i valori originali. `next_before: null` indica la fine dello storico. Un cursore o un limite non valido restituisce HTTP 422. Le risposte dell'endpoint delle letture sono ora paginate: per recuperare uno storico intero occorre seguire i cursori.
 
@@ -250,6 +256,7 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/integration/test_history.py
 ./scripts/hackbrew test tests/browser/test_history_dashboard.py
 ./scripts/hackbrew test tests/browser/test_history_pages.py
+./scripts/hackbrew test tests/integration/test_chart_readings.py tests/browser/test_combined_chart.py
 ./scripts/hackbrew test tests/integration/test_delivery.py
 ./scripts/hackbrew test tests/browser/test_delivery_dashboard.py
 ./scripts/hackbrew test tests/integration/test_pills.py
@@ -276,6 +283,8 @@ La procedura usa soltanto un progetto `hackbrew-tests-*` e il suo volume isolato
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, un gateway fisico o l'accesso al volume dell'applicazione. Le prove usano il codice reale del gateway privato: la modalità checkout locale non richiede credenziali durante il build.
 
 Le prove browser salvano schermate desktop/telefono in `artifacts/`, esclusa da Git. Le immagini `pillole-1440.png` e `pillole-390.png` mostrano il registro; `fermentazioni-parallele-1440.png` e `fermentazioni-parallele-390.png` mostrano card e dettaglio di cicli indipendenti.
+
+Le prove del grafico usano API HTTP e browser per verificare tutte le quantità, precisione, flag di qualità, valori mancanti, timestamp uguali, invii fuori ordine e aggiornamenti di fermentazioni diverse. La legenda conserva la scelta durante il live; il tooltip riporta un campione coerente. `grafico-combinato-{1440,390}.png` mostra le sette serie e `linea-campioni-distanti-{1440,390}.png` isola il tracciato tra due letture distanti tre giorni. Il test controlla il bitmap realmente disegnato nella zona fra i campioni: soli marcatori non soddisfano la verifica. Non ispeziona gli oggetti interni di Chart.js.
 
 ## Struttura
 

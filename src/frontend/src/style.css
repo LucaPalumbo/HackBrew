@@ -496,19 +496,96 @@ select:focus-visible {
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
-.charts {
+.measurement-chart {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #dfe5d9;
+  border-radius: 16px;
+  background: #fdfefa;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.chart-legend legend {
+  font-weight: 650;
+  margin-bottom: 16px;
+}
+.series-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 0;
+}
+.series-option input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  accent-color: #173f34;
+}
+.series-swatch {
+  width: 24px;
+  flex: 0 0 24px;
+  border-top: 3px solid;
+}
+.chart-description {
+  font-size: 12px;
+  color: #53685b;
+  line-height: 1.6;
+}
+.chart-scale-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.chart-scale-choice select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px;
+  font: inherit;
+  background: #fff;
+  color: #17382f;
+  border: 1px solid #bac8b7;
+  border-radius: 8px;
+}
+.chart-tooltip {
+  border-top: 1px solid #dfe5d9;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.chart-tooltip dl {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.chart-tooltip dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+.exact-timestamp {
+  display: block;
+  font-size: 11px;
+  color: #53685b;
+  margin-top: 4px;
+}
+@media (max-width: 640px) {
+  .measurement-chart {
+    padding: 12px 8px;
+  }
 }
 .chart-box {
   position: relative;
-  height: 270px;
+  height: clamp(420px, 55vh, 560px);
   min-width: 0;
-  background: #fdfefa;
-  border: 1px solid #dfe5d9;
-  border-radius: 16px;
-  padding: 12px;
 }
 .history-navigation {
   display: flex;
