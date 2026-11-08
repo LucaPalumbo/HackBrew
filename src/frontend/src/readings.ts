@@ -19,6 +19,7 @@ export type PillSnapshot = {
   mac: string
   reading: Reading | null
   last_received_at: string | null
+  communication_status: 'never_received' | 'receiving' | 'timed_out'
   available: boolean
   active_fermentation_id: string | null
 }

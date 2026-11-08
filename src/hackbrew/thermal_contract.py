@@ -8,6 +8,21 @@ Capability = Literal["heating", "cooling", "both"]
 Mode = Literal["off", "heating", "cooling"]
 
 
+class TimeoutConfiguration(BaseModel):
+    """Configuration CAS against the observed boot/control, without a mode change."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+    boot_id: str = Field(min_length=1, max_length=128)
+    command_id: str = Field(min_length=1, max_length=128)
+    expected_control_id: str | None
+    config_revision: int = Field(ge=0, le=2**63 - 1)
+    timeout_seconds: FiniteFloat = Field(gt=0)
+
+
+class AppliedTimeoutConfiguration(TimeoutConfiguration):
+    confirmed_at: AwareDatetime
+
+
 class ControlCommand(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
@@ -38,6 +53,8 @@ class DeviceState(BaseModel):
     confirmed_at: AwareDatetime | None
     last_command_at: AwareDatetime | None
     lease_expires_at: FiniteFloat | None
+    configuration_command: TimeoutConfiguration | None = None
+    applied_configuration: AppliedTimeoutConfiguration | None = None
 
     @model_validator(mode="after")
     def consistent_confirmation(self) -> Self:
@@ -53,6 +70,18 @@ class DeviceState(BaseModel):
         if self.application_status != "unknown" and self.actual_mode is None:
             raise ValueError("Missing physical confirmation")
         command = self.accepted_command
+        proof = self.applied_configuration
+        if proof is not None and (
+            proof.boot_id != self.boot_id
+            or proof.config_revision != self.applied_config_revision
+            or proof.timeout_seconds != self.applied_timeout_seconds
+        ):
+            raise ValueError("Configuration confirmation does not match applied values")
+        if (
+            self.configuration_command is not None
+            and self.configuration_command.boot_id != self.boot_id
+        ):
+            raise ValueError("Configuration belongs to another device boot")
         if command is not None:
             if command.boot_id != self.boot_id or command.mode != self.desired_mode:
                 raise ValueError("Accepted command belongs to another state")
@@ -61,12 +90,17 @@ class DeviceState(BaseModel):
         if self.application_status == "applied":
             if self.actual_mode != self.desired_mode:
                 raise ValueError("Acceptance is not confirmation of physical application")
-            if command is not None and (
-                self.applied_command_id != command.command_id
-                or self.applied_timeout_seconds != command.timeout_seconds
-                or self.applied_config_revision != command.config_revision
-            ):
+            if command is not None and (self.applied_command_id != command.command_id):
                 raise ValueError("Command/configuration has not been physically confirmed")
+            if (
+                command is not None
+                and proof is None
+                and (
+                    self.applied_timeout_seconds != command.timeout_seconds
+                    or self.applied_config_revision != command.config_revision
+                )
+            ):
+                raise ValueError("Missing configuration confirmation")
         if self.application_status == "timed_out" and self.actual_mode != "off":
             raise ValueError("Expired communication requires confirmed off")
         return self

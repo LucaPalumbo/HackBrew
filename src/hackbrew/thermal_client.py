@@ -4,7 +4,7 @@ import json
 from http.client import HTTPException as HTTPProtocolError
 from urllib.request import Request, urlopen
 
-from hackbrew.thermal_contract import ControlCommand, DeviceState
+from hackbrew.thermal_contract import ControlCommand, DeviceState, TimeoutConfiguration
 
 
 class ActuatorError(Exception):
@@ -22,8 +22,11 @@ class ThermalDeviceClient:
     def control(self, command: ControlCommand) -> DeviceState:
         return self._exchange("PUT", "/api/v1/control", command)
 
+    def configure_timeout(self, command: TimeoutConfiguration) -> DeviceState:
+        return self._exchange("PUT", "/api/v1/configuration", command)
+
     def _exchange(
-        self, method: str, path: str, command: ControlCommand | None = None
+        self, method: str, path: str, command: ControlCommand | TimeoutConfiguration | None = None
     ) -> DeviceState:
         data = json.dumps(command.model_dump(mode="json")).encode() if command else None
         request = Request(

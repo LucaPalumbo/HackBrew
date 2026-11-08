@@ -9,8 +9,13 @@ import pytest
 from tests.thermal import claim_command, thermal_simulator
 
 
+@pytest.fixture(autouse=True)
+def isolated_registry(empty_api: httpx.Client) -> None:
+    """No registered application device may configure these standalone contract fixtures."""
+
+
 def test_absolute_commands_are_idempotent_and_ordered() -> None:
-    with httpx.Client(base_url="http://thermal-both:8000", timeout=5) as simulator:
+    with thermal_simulator() as simulator:
         response = simulator.get("/api/v1/state")
         assert response.status_code == 200
         initial = response.json()

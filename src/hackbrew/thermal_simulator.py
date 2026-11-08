@@ -13,7 +13,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-from hackbrew.thermal_contract import Capability, ControlCommand, DeviceState, Mode
+from hackbrew.thermal_contract import (
+    AppliedTimeoutConfiguration,
+    Capability,
+    ControlCommand,
+    DeviceState,
+    Mode,
+    TimeoutConfiguration,
+)
 
 
 class SimulationSettings(BaseModel):
@@ -46,6 +53,10 @@ class Simulator:
         self.settings = SimulationSettings()
         self.pending: tuple[ControlCommand, float] | None = None
         self.ready_epoch: int | None = None
+        self.configuration_command: TimeoutConfiguration | None = None
+        self.applied_configuration: AppliedTimeoutConfiguration | None = None
+        self.pending_configuration: tuple[TimeoutConfiguration, float] | None = None
+        self.configuration_ids: set[str] = set()
 
     def state(self) -> DeviceState:
         return DeviceState(
@@ -73,6 +84,10 @@ class Simulator:
             lease_expires_at=(self.last_command_at.timestamp() + self.applied_timeout)
             if self.last_command_at
             else None,
+            configuration_command=self.configuration_command,
+            applied_configuration=self.applied_configuration
+            if self.settings.confirmation_available
+            else None,
         )
 
     def control(self, command: ControlCommand) -> DeviceState:
@@ -93,12 +108,18 @@ class Simulator:
                     if command == previous:
                         return self.state()
                     raise HTTPException(409, "Obsolete or conflicting command sequence.")
-        if command.command_id in self.commands:
+        if command.command_id in self.commands or command.command_id in self.configuration_ids:
             raise HTTPException(409, "Command identity already used.")
         if command.mode != "off" and self.ready_epoch != command.ownership_epoch:
             raise HTTPException(409, "Wait for confirmed off before enabling this ownership epoch.")
         revision = previous.config_revision if previous else self.applied_revision
         timeout = previous.timeout_seconds if previous else self.applied_timeout
+        if (
+            self.configuration_command is not None
+            and self.configuration_command.config_revision >= revision
+        ):
+            revision = self.configuration_command.config_revision
+            timeout = self.configuration_command.timeout_seconds
         if command.config_revision < revision or (
             command.config_revision == revision and command.timeout_seconds != timeout
         ):
@@ -108,6 +129,8 @@ class Simulator:
         self.last_command_at = datetime.now(UTC)
         self.last_valid_time = time.monotonic()
         self.expired = False
+        self.pending_configuration = None
+        self.configuration_command = None
         self.pending = (command, self.last_valid_time + self.settings.apply_delay_seconds)
         if self.settings.apply_delay_seconds == 0:
             self.apply(command)
@@ -115,8 +138,10 @@ class Simulator:
 
     def apply(self, command: ControlCommand) -> None:
         self.pending = None
-        self.applied_timeout = command.timeout_seconds
-        self.applied_revision = command.config_revision
+        if command.config_revision >= self.applied_revision:
+            self.applied_timeout = command.timeout_seconds
+            self.applied_revision = command.config_revision
+            self.applied_configuration = None
         # Delayed physical application never starts an already expired ON lease.
         if (
             self.last_valid_time is not None
@@ -138,6 +163,11 @@ class Simulator:
 
     def tick(self) -> None:
         if (
+            self.pending_configuration is not None
+            and time.monotonic() >= self.pending_configuration[1]
+        ):
+            self.apply_configuration(self.pending_configuration[0])
+        if (
             self.last_valid_time is not None
             and not self.expired
             and time.monotonic() - self.last_valid_time >= self.applied_timeout
@@ -145,6 +175,40 @@ class Simulator:
             self.expire()
         if self.pending is not None and time.monotonic() >= self.pending[1]:
             self.apply(self.pending[0])
+
+    def configure_timeout(self, command: TimeoutConfiguration) -> DeviceState:
+        identifier = self.accepted.command_id if self.accepted else None
+        if command.boot_id != self.boot_id or command.expected_control_id != identifier:
+            raise HTTPException(409, "Device boot/control changed; reconcile before configuring.")
+        if command == self.configuration_command:
+            return self.state()
+        previous = self.configuration_command or self.accepted
+        revision = previous.config_revision if previous else self.applied_revision
+        timeout = previous.timeout_seconds if previous else self.applied_timeout
+        if command.config_revision < revision or (
+            command.config_revision == revision and command.timeout_seconds != timeout
+        ):
+            raise HTTPException(409, "Obsolete or conflicting configuration revision.")
+        if command.command_id in self.configuration_ids or command.command_id in self.commands:
+            raise HTTPException(409, "Configuration identity already used.")
+        self.configuration_command = command
+        self.configuration_ids.add(command.command_id)
+        self.pending_configuration = (command, time.monotonic() + self.settings.apply_delay_seconds)
+        if self.settings.apply_delay_seconds == 0:
+            self.apply_configuration(command)
+        return self.state()
+
+    def apply_configuration(self, command: TimeoutConfiguration) -> None:
+        self.pending_configuration = None
+        identifier = self.accepted.command_id if self.accepted else None
+        if command.boot_id != self.boot_id or command.expected_control_id != identifier:
+            return
+        self.applied_timeout = command.timeout_seconds
+        self.applied_revision = command.config_revision
+        self.applied_configuration = AppliedTimeoutConfiguration(
+            **command.model_dump(), confirmed_at=datetime.now(UTC)
+        )
+        # Configuration does not renew contact, clear an expiry or reactivate a mode.
 
 
 @asynccontextmanager
@@ -201,6 +265,15 @@ async def control(command: ControlCommand, request: Request) -> DeviceState:
     if settings.control_http_status != 200:
         raise HTTPException(settings.control_http_status, "Simulated command failure.")
     return simulator(request).control(command)
+
+
+@app.put("/api/v1/configuration")
+async def configuration(command: TimeoutConfiguration, request: Request) -> DeviceState:
+    settings = simulator(request).settings
+    await asyncio.sleep(settings.control_delay_seconds)
+    if settings.control_http_status != 200:
+        raise HTTPException(settings.control_http_status, "Simulated configuration failure.")
+    return simulator(request).configure_timeout(command)
 
 
 @app.post("/__simulation/reset")

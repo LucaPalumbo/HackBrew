@@ -24,17 +24,16 @@ from hackbrew.history import initialize_history, record_reading
 from hackbrew.models import GatewayReading
 from hackbrew.pills import initialize_pills, pill_snapshots
 from hackbrew.pills import router as pills_router
+from hackbrew.settings import router as settings_router
+from hackbrew.settings import timeout_configuration
 from hackbrew.storage import database
 from hackbrew.thermal_devices import initialize_thermal_devices
 from hackbrew.thermal_devices import router as thermal_devices_router
+from hackbrew.timeout_sync import synchronize_timeouts
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    freshness_seconds = int(os.environ.get("HACKBREW_FRESHNESS_SECONDS", "300"))
-    if freshness_seconds <= 0:
-        raise ValueError("HACKBREW_FRESHNESS_SECONDS must be a positive integer")
-    application.state.freshness_seconds = freshness_seconds
     with MongoClient[dict[str, Any]](
         os.environ.get("MONGODB_URI", "mongodb://mongo:27017"),
         serverSelectionTimeoutMS=2000,
@@ -46,7 +45,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         initialize_thermal_devices(application.state.database)
         initialize_fermentations(application.state.database)
         initialize_history(application.state.database)
-        yield
+        timeout_configuration(application.state.database)
+        synchronization = asyncio.create_task(synchronize_timeouts(application.state.database))
+        try:
+            yield
+        finally:
+            synchronization.cancel()
+            await asyncio.gather(synchronization, return_exceptions=True)
 
 
 app = FastAPI(title="HackBrew", lifespan=lifespan)
@@ -54,6 +59,7 @@ app.include_router(fermentations_router)
 app.include_router(pills_router)
 app.include_router(bridge_router)
 app.include_router(thermal_devices_router)
+app.include_router(settings_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -82,7 +88,18 @@ def health(request: Request) -> dict[str, str]:
 @app.get("/api/readings/latest")
 def latest_reading(request: Request, pill_id: str | None = None) -> dict[str, object]:
     db = database(request)
+    configuration = timeout_configuration(db)
+    now = datetime.now(UTC).timestamp()
     pills = pill_snapshots(db)
+    for pill in pills:
+        received = pill["last_received_at"]
+        pill["communication_status"] = (
+            "never_received"
+            if received is None
+            else "timed_out"
+            if now - received.timestamp() >= configuration["communication_timeout_seconds"]
+            else "receiving"
+        )
     active = active_snapshot(db, pill_id)
     fermentation = active["fermentation"]
     if pill_id is None and isinstance(fermentation, dict):
@@ -97,8 +114,10 @@ def latest_reading(request: Request, pill_id: str | None = None) -> dict[str, ob
         "pill_id": selected["id"] if selected else None,
         "pills": pills,
         **active,
-        "freshness_seconds": request.app.state.freshness_seconds,
-        "server_time": datetime.now(UTC).timestamp(),
+        "communication_timeout_seconds": configuration["communication_timeout_seconds"],
+        "settings_revision": configuration["revision"],
+        "last_received_at": selected["last_received_at"] if selected else None,
+        "server_time": now,
     }
 
 
@@ -113,6 +132,7 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
             yield ServerSentEvent(event="unavailable", data={}, retry=2000)
             return
         persisted_state = (
+            snapshot["settings_revision"],
             snapshot["active_fermentations"],
             snapshot["pills"],
             snapshot["reading"],

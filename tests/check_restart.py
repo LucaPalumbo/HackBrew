@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
@@ -14,6 +15,7 @@ from playwright.sync_api import expect, sync_playwright
 from tests.database import arrange_single_active_index, reset_test_database
 from tests.fermentations import assert_single_concurrent_start
 from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
+from tests.settings import wait_for_sync
 
 
 def start_with_reading(
@@ -116,6 +118,8 @@ def seed(api: httpx.Client) -> dict[str, Any]:
         ],
     }
     for capability in ("heating", "cooling", "both"):
+        with httpx.Client(base_url=f"http://thermal-{capability}:8000") as simulator:
+            simulator.post("/__simulation/reset").raise_for_status()
         response = api.post(
             "/api/thermal-devices",
             json={
@@ -133,10 +137,44 @@ def seed(api: httpx.Client) -> dict[str, Any]:
             == "confirmed"
         )
     expected["thermal_devices"] = api.get("/api/thermal-devices").json()["devices"]
+    cooling = next(d for d in expected["thermal_devices"] if d["capability"] == "cooling")
+    with httpx.Client(base_url=cooling["base_url"]) as simulator:
+        simulator.patch("/__simulation", json={"apply_delay_seconds": 3}).raise_for_status()
+        saved = api.patch("/api/settings", json={"communication_timeout_seconds": 9})
+        saved.raise_for_status()
+        expected["settings_revision"] = saved.json()["revision"]
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            command = simulator.get("/api/v1/state").json()["configuration_command"]
+            if command and command["config_revision"] == expected["settings_revision"]:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("The configuration was not sent before restart")
+        simulator.patch("/__simulation", json={"confirmation_available": False}).raise_for_status()
+        wait_for_sync(api, cooling["id"], "pending")
+        expected["pending_device_id"] = cooling["id"]
+        expected["pending_command_id"] = command["command_id"]
     return expected
 
 
 def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
+    settings = api.get("/api/settings").json()
+    assert settings["communication_timeout_seconds"] == 9
+    assert settings["revision"] == expected["settings_revision"]
+    pending = next(d for d in settings["devices"] if d["id"] == expected["pending_device_id"])
+    assert pending["status"] == "pending"
+    with httpx.Client(base_url="http://thermal-cooling:8000") as simulator:
+        simulator.patch(
+            "/__simulation", json={"confirmation_available": True, "apply_delay_seconds": 0}
+        ).raise_for_status()
+        wait_for_sync(api, pending["id"], revision=expected["settings_revision"])
+        state = simulator.get("/api/v1/state").json()
+        assert state["applied_configuration"]["command_id"] == expected["pending_command_id"]
+        assert state["last_command_at"] is None
+    for device in expected["thermal_devices"]:
+        applied = wait_for_sync(api, device["id"], revision=expected["settings_revision"])
+        assert applied["applied_timeout_seconds"] == 9
     assert api.get("/api/thermal-devices").json()["devices"] == expected["thermal_devices"]
     assert api.get("/api/pills").json()["pills"] == expected["pills"]
     assert api.get("/api/bridge/pills").json() == expected["bridge_registry"]

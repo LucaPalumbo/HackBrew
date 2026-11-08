@@ -51,17 +51,18 @@ def test_new_letture_update_open_dashboard_without_reload(
 def test_lettura_becomes_stale_without_new_events_and_keeps_real_values(
     page: Page, api: httpx.Client, width: int, height: int
 ) -> None:
+    api.patch("/api/settings", json={"communication_timeout_seconds": 60}).raise_for_status()
     timestamp = int(datetime.now(UTC).timestamp())
     assert api.post("/telemetry", json=gateway_lettura(timestamp=timestamp)).status_code == 200
     page.set_viewport_size({"width": width, "height": height})
-    # The server's clock determines freshness even if the browser clock is wrong.
+    # Server receipt time determines communication age even with an incorrect browser clock.
     page.clock.install(time=datetime(2000, 1, 1, tzinfo=UTC))
     page.goto(str(api.base_url))
     expect(page.get_by_label("Stato dei dati")).to_have_text("Lettura disponibile")
     acquired_at = page.get_by_label("Acquisizione della lettura").get_attribute("datetime")
 
     page.clock.fast_forward(61_000)
-    expect(page.get_by_label("Stato dei dati")).to_have_text("Dati non aggiornati")
+    expect(page.get_by_label("Stato dei dati")).to_have_text("Timeout di comunicazione superato")
     expect(page.get_by_label("Acquisizione della lettura")).to_have_attribute(
         "datetime", acquired_at or ""
     )
@@ -85,7 +86,7 @@ def test_dashboard_recovers_persisted_lettura_after_failed_live_connection(
         page.get_by_role("region", name="Densità").get_by_text("1.050", exact=True)
     ).to_be_visible()
     expect(page.get_by_role("alert")).to_contain_text("Riconnessione automatica")
-    expect(page.get_by_label("Stato dei dati")).to_have_text("Dati non aggiornati")
+    expect(page.get_by_label("Stato dei dati")).to_have_text("Lettura disponibile")
 
     assert (
         api.post(

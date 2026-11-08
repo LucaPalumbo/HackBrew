@@ -61,7 +61,7 @@ Il [bridge reale aggiornato](https://github.com/LucaPalumbo/RaptPillGateway-ble-
 
 La pagina **Dispositivi** permette anche di registrare nome, funzioni (**Riscaldamento**, **Raffreddamento** o entrambe) e indirizzo HTTP(S) dei dispositivi termici. L'indirizzo deve essere raggiungibile dal backend, senza credenziali, query o frammenti. **Verifica collegamento** legge lo stato effettivo, capacità e timeout/revisione applicati; un errore mostra **Stato sconosciuto**, conservando separatamente l'ultima conferma precedente. Registrazione e verifica non inviano comandi di accensione.
 
-`GET/POST /api/thermal-devices` elencano e registrano i dispositivi; `POST /api/thermal-devices/{id}/check` ne verifica il collegamento. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout del dispositivo parte da tre ore; configurazione globale e regolazione saranno abilitate rispettivamente dalla #15 e dalla #16.
+`GET/POST /api/thermal-devices` elencano e registrano i dispositivi; `POST /api/thermal-devices/{id}/check` ne verifica il collegamento. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout globale parte da tre ore ed è configurabile nella pagina **Impostazioni**. La regolazione delle fermentazioni sarà abilitata dalla #16.
 
 Per provare la pagina con un dispositivo simulato opzionale:
 
@@ -70,6 +70,21 @@ Per provare la pagina con un dispositivo simulato opzionale:
 ```
 
 Registra **`http://thermal-simulator:8000`** come indirizzo del dispositivo, con entrambe le funzioni. L'API del simulatore è disponibile sull'host a `http://localhost:8081`; `down` lo arresta. Non è un servizio obbligatorio per l'applicazione. Le prove del simulatore non certificano hardware reale e non implementano firmware.
+
+### Timeout globale
+
+Apri **Impostazioni** (`http://localhost:8080/?page=settings`), inserisci il timeout in **secondi** e premi **Salva timeout**. Il valore iniziale è **10.800 secondi (tre ore)**, comune a tutte le fermentazioni. Sono accettate durate positive e finite, anche frazionarie; zero, valori negativi e input malformati sono rifiutati. La modifica è persistita in MongoDB e vale senza riavvio. Salvare lo stesso valore non aumenta la revisione.
+
+La pagina distingue il valore desiderato dalla revisione e durata effettivamente confermate da ciascun dispositivo. **Sincronizzazione in attesa** e **Errore di sincronizzazione** non significano aggiornamento riuscito: l'ultima conferma precedente rimane indicata separatamente. Il server ritenta in background anche senza browser aperto; al ritorno del dispositivo riconcilia la revisione corrente. Configurazione, revisione e comandi in sospeso sopravvivono al riavvio.
+
+La durata è simmetrica, con due origini distinte: sul server decorre dall'ultima **ricezione HTTP valida della pillola**, sul dispositivo dall'ultimo **comando di controllo valido**. Letture di stato, polling del bridge e sincronizzazioni della configurazione non rinnovano quei contatti. La configurazione usa un'operazione dedicata che preserva il modo del dispositivo; può anticipare la scadenza di un comando già ricevuto, ma non riattivare un dispositivo spento per timeout. Lo spegnimento degli attuatori in base alla scadenza dei dati della fermentazione sarà abilitato insieme alla regolazione nella #16.
+
+| API HackBrew | Risultato |
+| --- | --- |
+| `GET /api/settings` | `communication_timeout_seconds`, `revision`, `updated_at` e `devices` con durata/revisione desiderate, stato `pending`, `confirmed` o `error`, ultima durata/revisione confermate, orari ed errore. |
+| `PATCH /api/settings` con `{"communication_timeout_seconds":10800}` | Salva il valore globale e restituisce lo snapshot corrente. HTTP 200 conferma la persistenza, non l'applicazione fisica. HTTP 422 per input non valido, HTTP 503 se MongoDB non è disponibile. |
+
+La vecchia variabile `HACKBREW_FRESHNESS_SECONDS` non è più usata: il timeout si modifica tramite questa pagina o API, senza soglie per i gap del grafico.
 
 ### Impostazioni locali
 
@@ -81,7 +96,6 @@ Le impostazioni predefinite funzionano senza un file di configurazione locale. P
 | `HACKBREW_PORT` | `8080` | Porta dell'applicazione. |
 | `HACKBREW_FRONTEND_PORT` | `5173` | Porta Vite in sviluppo. |
 | `MONGODB_DATABASE` | `hackbrew` | Database dell'applicazione. |
-| `HACKBREW_FRESHNESS_SECONDS` | `300` | Età massima della lettura, in secondi interi positivi, prima di segnalare dati non aggiornati. |
 | `HACKBREW_SIMULATOR_PORT` | `8081` | Porta host del simulatore opzionale, pubblicata solo su loopback. |
 | `HACKBREW_SIMULATOR_CAPABILITY` | `both` | Funzioni del simulatore opzionale: `heating`, `cooling` o `both`. |
 
@@ -136,7 +150,7 @@ Il timestamp dell'esempio è storico: il gateway reale deve usare il proprio ora
 | Operazione | Risultato |
 | --- | --- |
 | `POST /telemetry` | Salva atomicamente la lettura se è più recente e restituisce l'ultima disponibile. |
-| `GET /api/readings/latest` | Snapshot con `reading` e `pill_id` diagnostici, `pills` con disponibilità e `last_received_at`, e `active_fermentations` con i riepiloghi di tutte le attive. I campi singolari `fermentation`/`fermentation_reading` si riferiscono alla pillola filtrata oppure all'unica attiva; senza una scelta univoca sono `null`. In diagnostica il valore predefinito è la prima pillola per nome e identificatore. Include `freshness_seconds` e `server_time`. |
+| `GET /api/readings/latest` | Snapshot con `reading` e `pill_id` diagnostici, `pills` con disponibilità, `last_received_at` e `communication_status` (`never_received`, `receiving`, `timed_out`), e `active_fermentations` con i riepiloghi di tutte le attive. I campi singolari `fermentation`/`fermentation_reading` si riferiscono alla pillola filtrata oppure all'unica attiva; senza una scelta univoca sono `null`. In diagnostica il valore predefinito è la prima pillola per nome e identificatore. Include `communication_timeout_seconds`, `settings_revision`, `last_received_at` della pillola selezionata e `server_time`. |
 | `GET /api/readings/events` | Stream SSE: invia subito lo stato persistito e poi le variazioni dell'ultima lettura, con eventi `reading`. |
 | `GET /api/health` | Verifica che l'applicazione possa raggiungere MongoDB. |
 
@@ -187,11 +201,11 @@ Ogni finestra contiene al massimo **200 letture originali**, condivise fra grafi
 
 Per le API, passa il valore opaco `next_before` come parametro `before` alla richiesta successiva, mantenendo lo stesso identificatore di fermentazione. Il cursore distingue anche campioni con lo stesso timestamp; ogni pagina è ordinata per acquisizione e conserva i valori originali. `next_before: null` indica la fine dello storico. Un cursore o un limite non valido restituisce HTTP 422. Le risposte dell'endpoint delle letture sono ora paginate: per recuperare uno storico intero occorre seguire i cursori.
 
-## Aggiornamenti live e freschezza
+## Aggiornamenti live e comunicazione
 
-La dashboard distingue **Nessuna lettura**, **Lettura disponibile** e **Dati non aggiornati**. L'età si riferisce all'acquisizione sul gateway, usando l'orario del server come riferimento; oltre la soglia conserva misure e orari reali. La soglia predefinita di cinque minuti è un criterio di freschezza, non la frequenza di trasmissione della pillola né una diagnosi di un dispositivo offline. L'esempio storico sopra apparirà quindi come non aggiornato.
+La dashboard distingue **Nessuna lettura**, **Lettura disponibile** e **Timeout di comunicazione superato**. Il tempo decorre dall'ultima ricezione della pillola sul server, usando il timeout globale delle Impostazioni e l'orario del server come riferimento. Una lettura con acquisizione antica appena ricevuta conferma il contatto corrente; l'orario di acquisizione originale resta visibile. Al superamento del timeout vengono conservati misure e orari reali. Non sono introdotte soglie né interruzioni per i gap del grafico.
 
-Il collegamento live ha uno stato separato. Se si interrompe, la pagina conserva i valori e segnala la riconnessione automatica. Alla ripresa riceve un nuovo stato completo da MongoDB, recuperando anche le letture perse durante l'interruzione. Il recupero HTTP fornisce anche soglia e orario del server, così la freschezza viene valutata anche quando il live non è ancora disponibile.
+Il collegamento live ha uno stato separato. Se si interrompe, la pagina conserva i valori e segnala la riconnessione automatica. Alla ripresa riceve un nuovo stato completo da MongoDB, recuperando anche le letture perse durante l'interruzione. Il recupero HTTP fornisce anche timeout, ultima ricezione e orario del server, così lo stato di comunicazione viene valutato anche quando il live non è ancora disponibile.
 
 Con risposte lente, gli aggiornamenti automatici di card e dettaglio attendono il caricamento già in corso e accodano un solo recupero successivo. Cambiare ricerca, pagina o fermentazione sostituisce invece la richiesta precedente. La navigazione resta utilizzabile e un errore non viene trasformato in un elenco vuoto mentre si attende una nuova risposta valida.
 
@@ -266,15 +280,19 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/integration/test_bridge.py tests/browser/test_bridge_dashboard.py
 ./scripts/hackbrew test tests/integration/test_thermal_devices.py tests/integration/test_thermal_contract.py
 ./scripts/hackbrew test tests/browser/test_thermal_devices_dashboard.py
+./scripts/hackbrew test tests/integration/test_settings.py tests/integration/test_timeout_configuration.py
+./scripts/hackbrew test tests/browser/test_settings_dashboard.py
 ```
 
-La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. L'ambiente isolato imposta la freschezza a 60 secondi; il test browser avanza il tempo per verificare l'invecchiamento senza attese reali. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. I test di consegna coprono invii ripetuti e concorrenti, valori distinti allo stesso timestamp, letture fuori ordine e confini tra due fermentazioni.
+La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. I test configurano timeout brevi tramite l'API pubblica; il test browser avanza il tempo per verificare la scadenza senza attese reali. I test delle impostazioni coprono monitoraggi attivi, salvataggio fallito, revisioni concorrenti, conferme discordanti o ritardate, indisponibilità e recupero. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. I test di consegna coprono invii ripetuti e concorrenti, valori distinti allo stesso timestamp, letture fuori ordine e confini tra due fermentazioni.
 
 Le prove del bridge avviano il vero eseguibile del gateway con input BLE deterministici, attraverso lo stesso ricevitore e parser usato con l'adattatore. Verificano HTTP reale, sincronizzazione automatica, due pillole visibili nel browser, duplicati separati, accelerazioni con segno, qualità della velocità e consegne fallite senza retry. Il gateway non diventa un servizio applicativo obbligatorio.
 
 **La repository del gateway è privata.** Prima di `test`, `test-recovery` o `check`, scegli una delle modalità: usa una checkout a cui hai accesso con `export HACKBREW_GATEWAY_SOURCE=/percorso/assoluto/RaptPillGateway-ble-http` (per riprodurre la consegna, commit `de4cd6395b67b97f154fe0ed6f5cd8fa82a35e90`), oppure esporta `HACKBREW_GATEWAY_TOKEN` con una credenziale GitHub autorizzata alla lettura della repository. Con GitHub CLI già autenticata puoi usare `export HACKBREW_GATEWAY_TOKEN="$(gh auth token)"`. Questa seconda modalità scarica il commit fissato in Compose e passa il token solo come secret di build, senza salvarlo nell'immagine o nella configurazione dei servizi. Non inserire credenziali negli URL. `up`, `dev`, build applicativa, lint e typecheck non richiedono il gateway. La [guida](docs/integrations/rapt-gateway.md) dettaglia entrambe le opzioni.
 
 Il controllo completo conserva fuori dall'applicazione snapshot JSON e riavvia realmente l'applicazione sullo stesso volume di test in due scenari. Il primo prepara il vincolo globale della #9 e verifica la sua sostituzione con quello per pillola, senza perdere registrazioni, ciclo o letture. Il secondo salva due fermentazioni attive e una conclusa, verificando dopo il riavvio assegnazioni, misure, deduplicazione concorrente, storico browser e vincoli di riuso per pillola. Tutte le asserzioni osservano API e browser; la preparazione degli indici precedenti è confinata al solo database di test.
+
+La stessa prova di riavvio conserva il timeout globale modificato e una configurazione termica ancora in attesa: il recupero conferma lo stesso comando persistito, senza comandi di modo, con identica durata su tutti e tre i simulatori. La prova di guasto reale a MongoDB include lettura e modifica delle impostazioni, che devono restituire HTTP 503.
 
 Il controllo completo esegue inoltre la prova operativa disponibile separatamente con `./scripts/hackbrew test-recovery`. La prova crea una fermentazione conclusa e una attiva, apre monitoraggio e storico nel browser, ferma MongoDB e verifica gli errori HTTP 503, i valori conservati e un termine fallito nell'interfaccia. Ripristina MongoDB, invia una nuova acquisizione e verifica il recupero automatico dello storico; poi ferma l'applicazione e ricrea entrambi i container mantenendo il volume di test. Controlla dati persistiti, riconnessione live, nuova lettura e successivo termine manuale. I messaggi rifiutati durante i guasti non vengono ritrasmessi dal test.
 
@@ -283,6 +301,8 @@ La procedura usa soltanto un progetto `hackbrew-tests-*` e il suo volume isolato
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, un gateway fisico o l'accesso al volume dell'applicazione. Le prove usano il codice reale del gateway privato: la modalità checkout locale non richiede credenziali durante il build.
 
 Le prove browser salvano schermate desktop/telefono in `artifacts/`, esclusa da Git. Le immagini `pillole-1440.png` e `pillole-390.png` mostrano il registro; `fermentazioni-parallele-1440.png` e `fermentazioni-parallele-390.png` mostrano card e dettaglio di cicli indipendenti.
+
+Le immagini `impostazioni-timeout-{1440,390}.png` mostrano impostazioni globali e conferme dei dispositivi.
 
 Le prove del grafico usano API HTTP e browser per verificare tutte le quantità, precisione, flag di qualità, valori mancanti, timestamp uguali, invii fuori ordine e aggiornamenti di fermentazioni diverse. La legenda conserva la scelta durante il live; il tooltip riporta un campione coerente. `grafico-combinato-{1440,390}.png` mostra le sette serie e `linea-campioni-distanti-{1440,390}.png` isola il tracciato tra due letture distanti tre giorni. Il test controlla il bitmap realmente disegnato nella zona fra i campioni: soli marcatori non soddisfano la verifica. Non ispeziona gli oggetti interni di Chart.js.
 

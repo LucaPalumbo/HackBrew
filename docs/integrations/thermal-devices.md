@@ -1,6 +1,6 @@
 # Dispositivi termici e contratto HTTP provvisorio
 
-La [#14](https://github.com/LucaPalumbo/HackBrew/issues/14) introduce registrazione e osservazione dei dispositivi. La regolazione delle fermentazioni appartiene alla [#16](https://github.com/LucaPalumbo/HackBrew/issues/16); impostazione globale e sincronizzazione del timeout alla [#15](https://github.com/LucaPalumbo/HackBrew/issues/15). Questa versione non offre un override manuale e non invia comandi ON dalle fermentazioni.
+La [#14](https://github.com/LucaPalumbo/HackBrew/issues/14) introduce registrazione e osservazione dei dispositivi. La [#15](https://github.com/LucaPalumbo/HackBrew/issues/15) aggiunge impostazione globale e sincronizzazione del timeout. La regolazione delle fermentazioni appartiene alla [#16](https://github.com/LucaPalumbo/HackBrew/issues/16). Questa versione non offre un override manuale e non invia comandi ON dalle fermentazioni.
 
 ## Registrazione e verifica nell'applicazione
 
@@ -18,7 +18,17 @@ In caso di HTTP fallito, risposta malformata, capacità incompatibili o timeout 
 
 Una verifica HTTP più vecchia e lenta non può sovrascrivere una verifica iniziata successivamente. Le revisioni delle verifiche sono persistite e aggiornate atomicamente. HTTP 404 indica un identificatore sconosciuto, HTTP 422 input non valido. Se MongoDB è indisponibile, le API rispondono HTTP 503 senza confermare una registrazione o un risultato non salvato.
 
-L'adattatore sostituibile è `src/hackbrew/thermal_client.py`: racchiude GET/PUT, percorsi, timeout di trasporto e validazione del protocollo. La futura regolazione userà l'operazione di comando dello stesso adattatore; in questa consegna l'applicazione usa soltanto la lettura dello stato.
+L'adattatore sostituibile è `src/hackbrew/thermal_client.py`: racchiude GET/PUT, percorsi, timeout di trasporto e validazione del protocollo. L'applicazione legge lo stato e invia configurazioni del timeout; la futura regolazione userà l'operazione di comando del modo dello stesso adattatore.
+
+## Configurazione globale e sincronizzazione
+
+La pagina **Impostazioni** (`/?page=settings`) usa `GET /api/settings` e `PATCH /api/settings` con `{"communication_timeout_seconds":10800}`. L'unico valore persistito è inizialmente tre ore, positivo e finito, modificabile senza riavvio. Ogni variazione effettiva aumenta atomicamente la revisione; risalvare lo stesso valore la mantiene.
+
+La risposta separa valore e revisione globali desiderati da `applied_revision`, `applied_timeout_seconds` e `confirmed_at` dell'ultima conferma per dispositivo. Lo stato è `pending`, `confirmed` o `error`; solo la conferma della revisione/durata correnti indica sincronizzazione riuscita. Un errore conserva l'ultima conferma storica senza presentarla come corrente. `last_attempt_at` indica l'ultimo tentativo del server.
+
+Un task del backend riconcilia tutti i dispositivi anche senza browser aperto, usando revisioni e identità dei comandi persistite. Un aggiornamento obsoleto non può confermare la nuova configurazione. Errori di trasporto/protocollo vengono esposti e ritentati; al ritorno del dispositivo viene inviata la revisione corrente. Un salvataggio globale non attende gli attuatori e non ne conferma l'applicazione. Un errore MongoDB produce HTTP 503.
+
+La stessa durata vale per server e dispositivi, ma il server misura dall'ultima ricezione dati valida **per pillola**, il dispositivo dall'ultimo comando **di controllo** valido. Polling, GET dello stato e aggiornamenti della configurazione non rinnovano questi istanti. La scadenza sul server comanderà lo spegnimento delle fermentazioni con la #16.
 
 ## Contratto del dispositivo, versione 1
 
@@ -26,6 +36,7 @@ Gli endpoint seguenti appartengono al dispositivo esterno o al simulatore, non a
 
 - `GET /api/v1/state`: capacità, identità del dispositivo, identità dell'avvio e stato confermato.
 - `PUT /api/v1/control`: comando assoluto `off`, `heating` o `cooling`. `off` disabilita entrambe le funzioni di un dispositivo combinato.
+- `PUT /api/v1/configuration`: aggiornamento del solo timeout, senza cambiare modo o rinnovare il contatto di controllo.
 
 Esempio di comando:
 
@@ -52,6 +63,26 @@ La revisione del timeout non può retrocedere; riusare la stessa revisione con u
 
 Un nuovo avvio del simulatore genera un `boot_id` diverso e parte OFF. I comandi di un avvio precedente sono rifiutati: dopo un riavvio occorre rileggere lo stato e riconciliare il dispositivo. Il simulatore non richiede persistenza su disco per impedire che un pacchetto del vecchio avvio lo riaccenda.
 
+### Aggiornamento del solo timeout
+
+La #15 estende il contratto provvisorio con un'operazione dedicata. Reinviare l'ultimo comando ON per aggiornare la configurazione rinnoverebbe il contatto o potrebbe riattivare un modo scaduto; questo endpoint aggiorna solo la durata:
+
+```json
+{
+  "boot_id": "<dall'ultima lettura di stato>",
+  "command_id": "<identità persistita della configurazione>",
+  "expected_control_id": null,
+  "config_revision": 1,
+  "timeout_seconds": 7200
+}
+```
+
+`expected_control_id` è l'identità di `accepted_command`, oppure `null` se non esistono comandi di controllo. È obbligatorio: avvio o comando cambiati dal momento della lettura causano HTTP 409 senza applicazione. La revisione è un intero non negativo (massimo `2^63 - 1`); durata positiva e finita. Revisioni precedenti, stessa revisione con durata diversa e riuso di identità con contenuto diverso producono HTTP 409. Un retry identico dell'ultima configurazione è idempotente e non sposta la sua applicazione ritardata.
+
+La risposta ha lo schema di stato, con `configuration_command` per il valore accettato e `applied_configuration` per il valore fisicamente confermato: corpo del comando più `confirmed_at`. Questi campi sono opzionali per le letture dei dispositivi precedenti; i dispositivi che ricevono aggiornamenti devono implementare l'estensione. La conferma deve appartenere allo stesso avvio e riportare durata/revisione applicate coerenti. Il server rifiuta una risposta PUT riferita a un altro dispositivo o avvio.
+
+L'operazione non altera `accepted_command`, modo desiderato/effettivo, `last_command_at` o identità dell'assegnazione. La scadenza diagnostica viene ricalcolata dalla **stessa** ultima ricezione del controllo usando la durata applicata. Ridurla può far scattare il watchdog; allungarla non annulla uno spegnimento già avvenuto. Un controllo più recente sostituisce una configurazione pendente e non può retrocedere la revisione accettata. Dopo un riavvio del server lo stesso comando di configurazione può essere ritentato; dopo un nuovo avvio del dispositivo si riconcilia con la nuova identità, senza comandi ON.
+
 ### Accettazione e conferma fisica
 
 GET e PUT restituiscono lo stesso schema:
@@ -71,7 +102,9 @@ GET e PUT restituiscono lo stesso schema:
   "applied_config_revision": 0,
   "confirmed_at": "2026-11-04T12:00:00Z",
   "last_command_at": null,
-  "lease_expires_at": null
+  "lease_expires_at": null,
+  "configuration_command": null,
+  "applied_configuration": null
 }
 ```
 
@@ -79,7 +112,7 @@ L'esempio rappresenta un dispositivo appena avviato, senza comandi. Dopo un coma
 
 `application_status` distingue:
 
-- `applied`: modo, identità del comando, timeout e revisione sono confermati come applicati.
+- `applied`: modo e identità del comando di controllo sono confermati come applicati. Se una configurazione separata è ancora pendente, timeout/revisione applicati possono essere quelli precedenti: confrontare i campi desiderati con quelli applicati.
 - `pending`: il comando è accettato; modo e configurazione applicati possono ancora essere quelli precedenti.
 - `unknown`: conferma fisica indisponibile; `actual_mode` e `confirmed_at` sono `null`.
 - `timed_out`: spegnimento autonomo confermato, anche se `desired_mode` era ON. La precedente identità applicata non costituisce una nuova conferma ON.
@@ -122,11 +155,13 @@ curl --fail-with-body -X PATCH http://localhost:8081/__simulation \
 ./scripts/hackbrew test tests/integration/test_thermal_devices.py
 ./scripts/hackbrew test tests/integration/test_thermal_contract.py
 ./scripts/hackbrew test tests/browser/test_thermal_devices_dashboard.py
+./scripts/hackbrew test tests/integration/test_settings.py tests/integration/test_timeout_configuration.py
+./scripts/hackbrew test tests/browser/test_settings_dashboard.py
 ./scripts/hackbrew check
 ```
 
 Come per le altre prove, configurare prima l'accesso alla sorgente privata del gateway come indicato nel README. Il workflow crea simulatori distinti per ogni capacità sulla sola rete Docker di test, con MongoDB e volume isolati. I test osservano HTTP e browser; non interrogano internamente il database. Verificano tutte le capacità, validazione, doppie registrazioni concorrenti, stato sconosciuto, risposte malformate, ritardi, rifiuti e recupero; ordinamento, idempotenza, generazioni delle assegnazioni, nuova identità di avvio e spegnimento autonomo senza letture HTTP. Le prove veloci configurano durate brevi attraverso il contratto, senza cambiare il valore predefinito di tre ore.
 
-Il controllo completo verifica inoltre che registro e conferme persistano dopo un vero riavvio dell'applicazione e che le API restituiscano HTTP 503 durante un guasto reale a MongoDB. Le schermate desktop/telefono sono in `artifacts/dispositivi-termici-1440.png` e `artifacts/dispositivi-termici-390.png` (escluse da Git).
+Il controllo completo verifica inoltre che registro, timeout globale, revisione e configurazioni pendenti persistano dopo un vero riavvio dell'applicazione, con recupero delle conferme e stessa durata su tutte le capacità. Le API di impostazione restituiscono HTTP 503 durante un guasto reale a MongoDB. Le schermate desktop/telefono sono in `artifacts/dispositivi-termici-{1440,390}.png` e `artifacts/impostazioni-timeout-{1440,390}.png` (escluse da Git).
 
 Queste prove certificano il comportamento del simulatore e dell'integrazione software, **non firmware o hardware reali**. Non vengono implementati driver o firmware. I futuri dispositivi fisici dovranno implementare lo stesso protocollo, conferme reali e scadenza autonoma; gli endpoint potranno essere sostituiti nell'adattatore.

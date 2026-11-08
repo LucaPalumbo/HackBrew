@@ -5,6 +5,7 @@ import FermentationArchive from './FermentationArchive.vue'
 import FermentationHistory from './FermentationHistory.vue'
 import PillRegistry from './PillRegistry.vue'
 import ThermalDeviceRegistry from './ThermalDeviceRegistry.vue'
+import SettingsPage from './SettingsPage.vue'
 import type { Fermentation, FermentationSummary } from './fermentations'
 import type { PillSnapshot, Reading } from './readings'
 
@@ -12,7 +13,7 @@ type Snapshot = {
   reading: Reading | null
   pill_id: string | null
   pills: PillSnapshot[]
-  freshness_seconds: number
+  communication_timeout_seconds: number
   server_time: number
   fermentation: Fermentation | null
   fermentation_reading: Reading | null
@@ -21,6 +22,8 @@ type Snapshot = {
 
 const devicesPage =
   new URLSearchParams(window.location.search).get('page') === 'devices'
+const settingsPage =
+  new URLSearchParams(window.location.search).get('page') === 'settings'
 const pills = ref<PillSnapshot[]>([])
 const diagnosticPillId = ref('')
 const diagnosticReading = computed(
@@ -64,21 +67,27 @@ let streamRevision = 0
 const historyRevision = ref(0)
 const recoveryRevision = ref(0)
 let disposed = false
-let freshnessTimer: ReturnType<typeof setInterval> | undefined
-const freshnessSeconds = ref<number | null>(null)
+let communicationTimer: ReturnType<typeof setInterval> | undefined
+const communicationTimeout = ref<number | null>(null)
 const serverReference = ref<{ time: number; observedAt: number } | null>(null)
 const clock = ref(performance.now())
 const dataStatus = computed(() => {
   if (!hasSnapshot.value) return 'Stato dei dati non disponibile'
   if (!reading.value)
     return fermentation.value ? 'In attesa di letture' : 'Nessuna lettura'
-  if (!serverReference.value || freshnessSeconds.value === null)
-    return 'Verifica freschezza…'
+  if (!serverReference.value || communicationTimeout.value === null)
+    return 'Verifica comunicazione…'
   const serverNow =
     serverReference.value.time +
     (clock.value - serverReference.value.observedAt) / 1000
-  return serverNow - reading.value.timestamp >= freshnessSeconds.value
-    ? 'Dati non aggiornati'
+  const identifier = fermentation.value?.pill_id ?? diagnosticPillId.value
+  const received = pills.value.find(
+    (pill) => pill.id === identifier,
+  )?.last_received_at
+  if (!received) return 'Nessuna comunicazione ricevuta'
+  return serverNow - new Date(received).getTime() / 1000 >=
+    communicationTimeout.value
+    ? 'Timeout di comunicazione superato'
     : 'Lettura disponibile'
 })
 
@@ -120,7 +129,7 @@ function applySnapshot(snapshot: Snapshot) {
   fermentation.value = snapshot.fermentation
   activeFermentations.value = snapshot.active_fermentations
   fermentationReading.value = snapshot.fermentation_reading
-  freshnessSeconds.value = snapshot.freshness_seconds
+  communicationTimeout.value = snapshot.communication_timeout_seconds
   clock.value = performance.now()
   serverReference.value = {
     time: snapshot.server_time,
@@ -158,12 +167,13 @@ function disconnectLive() {
 }
 
 onMounted(() => {
+  if (settingsPage) return
   void loadLatest()
   window.addEventListener('offline', disconnectLive)
   window.addEventListener('online', connectLive)
   window.addEventListener('popstate', restoreSelection)
   connectLive()
-  freshnessTimer = setInterval(() => {
+  communicationTimer = setInterval(() => {
     clock.value = performance.now()
   }, 1000)
 })
@@ -173,7 +183,7 @@ onUnmounted(() => {
   window.removeEventListener('online', connectLive)
   window.removeEventListener('popstate', restoreSelection)
   events?.close()
-  clearInterval(freshnessTimer)
+  clearInterval(communicationTimer)
 })
 </script>
 
@@ -185,7 +195,9 @@ onUnmounted(() => {
         <span>Hack<span class="brand-accent">Brew</span></span>
       </a>
       <nav class="main-navigation" aria-label="Navigazione principale">
-        <a href="/" :aria-current="!devicesPage ? 'page' : undefined"
+        <a
+          href="/"
+          :aria-current="!devicesPage && !settingsPage ? 'page' : undefined"
           >Monitoraggio</a
         >
         <a
@@ -193,21 +205,29 @@ onUnmounted(() => {
           :aria-current="devicesPage ? 'page' : undefined"
           >Dispositivi</a
         >
+        <a
+          href="/?page=settings"
+          :aria-current="settingsPage ? 'page' : undefined"
+          >Impostazioni</a
+        >
       </nav>
       <span class="mode">{{
-        selectedId
-          ? 'Dettaglio fermentazione'
-          : !hasSnapshot
-            ? 'Monitoraggio non disponibile'
-            : activeFermentations.length > 1
-              ? 'Fermentazioni in corso'
-              : fermentation
-                ? 'Fermentazione in corso'
-                : 'Modalità diagnostica'
+        settingsPage
+          ? 'Impostazioni globali'
+          : selectedId
+            ? 'Dettaglio fermentazione'
+            : !hasSnapshot
+              ? 'Monitoraggio non disponibile'
+              : activeFermentations.length > 1
+                ? 'Fermentazioni in corso'
+                : fermentation
+                  ? 'Fermentazione in corso'
+                  : 'Modalità diagnostica'
       }}</span>
     </header>
 
-    <main v-if="devicesPage">
+    <main v-if="settingsPage"><SettingsPage /></main>
+    <main v-else-if="devicesPage">
       <PillRegistry
         :pills="pills"
         :loading="isLoading"
@@ -282,7 +302,7 @@ onUnmounted(() => {
         </div>
         <p
           class="data-status"
-          :class="{ stale: dataStatus === 'Dati non aggiornati' }"
+          :class="{ stale: dataStatus === 'Timeout di comunicazione superato' }"
           role="status"
           aria-label="Stato dei dati"
         >

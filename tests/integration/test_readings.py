@@ -14,7 +14,7 @@ def test_no_lettura_is_reported_explicitly_before_first_message(api: httpx.Clien
 
     assert response.status_code == 200
     assert response.json()["reading"] is None
-    assert response.json()["freshness_seconds"] == 60
+    assert response.json()["communication_timeout_seconds"] == 10800
     assert before <= response.json()["server_time"] <= datetime.now(UTC).timestamp()
 
 

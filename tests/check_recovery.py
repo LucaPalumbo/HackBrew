@@ -96,6 +96,8 @@ def verify_database_outage(
         ("POST", "/api/pills", {"name": "Non registrata", "mac": "11:22:33:44:55:66"}),
         ("POST", f"/api/fermentations/{expected['active']['id']}/end", None),
         ("GET", "/api/readings/latest", None),
+        ("GET", "/api/settings", None),
+        ("PATCH", "/api/settings", {"communication_timeout_seconds": 17}),
         ("GET", "/api/thermal-devices", None),
         (
             "POST",

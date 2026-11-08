@@ -109,6 +109,13 @@ async function register() {
         pill.available ? 'Disponibile' : 'Assegnata a una fermentazione attiva'
       }}
     </p>
+    <p v-if="pill.last_received_at" class="fermentation-period">
+      {{
+        pill.communication_status === 'timed_out'
+          ? 'Timeout di comunicazione superato'
+          : 'Comunicazione entro il timeout'
+      }}
+    </p>
     <p v-if="!pill.reading">Nessuna lettura ricevuta.</p>
     <template v-else>
       <dl class="pill-quantities">

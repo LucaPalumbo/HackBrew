@@ -63,11 +63,11 @@ def test_live_stream_starts_with_persisted_state_and_delivers_new_letture(
         assert saved == event["reading"]
 
 
-def test_snapshot_includes_configured_freshness_and_server_time(api: httpx.Client) -> None:
+def test_snapshot_includes_global_communication_timeout_and_server_time(api: httpx.Client) -> None:
     before = datetime.now(UTC).timestamp()
     with api.stream("GET", "/api/readings/events") as response:
         snapshot = next_snapshot(response.iter_lines())
-        assert snapshot["freshness_seconds"] == 60
+        assert snapshot["communication_timeout_seconds"] == 10800
         assert before <= snapshot["server_time"] <= datetime.now(UTC).timestamp()
 
 

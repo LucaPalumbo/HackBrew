@@ -69,3 +69,55 @@ def malformed_http_device(state: dict[str, Any]) -> Iterator[tuple[str, threadin
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+@contextmanager
+def discordant_configuration_device(
+    simulator: httpx.Client,
+) -> Iterator[tuple[str, threading.Event]]:
+    """HTTP fault proxy: stale reads and coherent acknowledgements for a different boot."""
+    initial = simulator.get("/api/v1/state").json()
+    fault = threading.Event()
+    fault.set()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if fault.is_set():
+                self.reply(initial)
+            else:
+                self.reply(simulator.get(self.path).json())
+
+        def do_PUT(self) -> None:
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            response = simulator.put(
+                self.path, content=body, headers={"Content-Type": "application/json"}
+            )
+            payload = response.json()
+            if response.status_code == 200 and fault.is_set():
+                payload["boot_id"] = "different-boot"
+                for key in ("configuration_command", "applied_configuration", "accepted_command"):
+                    if payload.get(key) is not None:
+                        payload[key]["boot_id"] = "different-boot"
+            self.reply(payload, response.status_code)
+
+        def reply(self, payload: dict[str, Any], status: int = 200) -> None:
+            data = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    address = socket.gethostbyname(socket.gethostname())
+    try:
+        yield f"http://{address}:{server.server_port}", fault
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
