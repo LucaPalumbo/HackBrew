@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from playwright.sync_api import Page
 
-from tests.database import reset_test_database
+from tests.database import arrange_heating_v16, reset_test_database
 from tests.heating import start_heating, temperature, wait_regulation
 from tests.payloads import register_test_pill
 from tests.thermal import thermal_simulator
@@ -43,6 +43,7 @@ def verify_heating_recovery(
         wait_regulation(api, cycle, "heating")
         temperature(api, 18.25)
         before = simulator.get("/api/v1/state").json()["accepted_command"]
+        arrange_heating_v16(cycle["id"], cycle["heater_id"])
         phase("restart-heating-hysteresis", "heating-hysteresis-up", page)
         continued = wait_device(
             simulator,

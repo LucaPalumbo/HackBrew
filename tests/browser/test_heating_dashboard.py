@@ -62,6 +62,6 @@ def test_create_heat_and_end_with_truthful_pending_shutdown(
             "/__simulation", json={"state_http_status": 200, "control_http_status": 200}
         ).raise_for_status()
         expect(regulation).to_contain_text("Spegnimento confermato", timeout=15000)
-        expect(regulation).to_contain_text("Dispositivo disponibile")
+        expect(regulation).to_contain_text("Assegnazione rilasciata")
         page.reload()
         expect(regulation).to_contain_text("Spegnimento confermato")

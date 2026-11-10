@@ -12,6 +12,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 from tests.database import reset_test_database
 from tests.heating_recovery import verify_heating_recovery
 from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
+from tests.thermal_recovery import verify_thermal_recovery
 
 
 def phase(ready: str, restored: str, page: Page) -> None:
@@ -241,6 +242,7 @@ def main() -> None:
             verify_database_outage(api, current, archive, expected)
             verify_application_recreation(api, current, archive, expected)
             verify_heating_recovery(api, current, phase)
+            verify_thermal_recovery(api, current, phase)
             browser.close()
     print(
         "Recovery: MongoDB, app e container ricreati; stato, storico e live verificati.", flush=True

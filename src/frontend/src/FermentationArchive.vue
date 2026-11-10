@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { regulationNames, type FermentationSummary } from './fermentations'
-import { modeNames } from './thermalDevices'
+import {
+  controlModeNames,
+  regulationNames,
+  type FermentationSummary,
+} from './fermentations'
+import { capabilityNames, modeNames } from './thermalDevices'
 import { useLatestRequest } from './useLatestRequest'
 
 const props = defineProps<{
@@ -126,20 +130,40 @@ watch(
             >{{ entry.pill_name }} · {{ entry.pill_mac }}</span
           >
           <span class="card-mode">{{
-            entry.control_mode === 'monitor_only'
-              ? 'Solo monitoraggio'
-              : 'Riscaldamento'
+            controlModeNames[entry.control_mode]
           }}</span>
           <template v-if="entry.regulation">
             <span class="card-mode">{{
               regulationNames[entry.regulation.status]
             }}</span>
             <span class="card-pill"
-              >{{ entry.heater_name }} · Fascia {{ entry.temperature_min }}–{{
-                entry.temperature_max
-              }}
-              °C · Isteresi {{ entry.hysteresis }} °C</span
+              >{{ entry.devices?.map((device) => device.name).join(' + ') }} ·
+              Fascia {{ entry.temperature_min }}–{{ entry.temperature_max }} °C
+              · Isteresi {{ entry.hysteresis }} °C</span
             >
+            <span
+              v-for="device in entry.devices"
+              :key="device.id"
+              class="card-pill"
+            >
+              {{ device.name }} · {{ capabilityNames[device.capability] }} ·
+              {{
+                entry.regulation.devices[device.id]?.error
+                  ? 'Comunicazione non confermata'
+                  : entry.regulation.devices[device.id]?.reserved
+                    ? 'Riservato'
+                    : 'Assegnazione rilasciata'
+              }}
+              <template v-if="entry.regulation.devices[device.id]">
+                · Effettivo:
+                {{
+                  modeNames[
+                    entry.regulation.devices[device.id]?.actual_mode ??
+                      'unknown'
+                  ]
+                }}
+              </template>
+            </span>
             <span class="card-pill"
               >Richiesto: {{ modeNames[entry.regulation.desired_mode] }} ·
               Effettivo:

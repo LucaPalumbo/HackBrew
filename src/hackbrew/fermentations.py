@@ -21,6 +21,37 @@ router = APIRouter(prefix="/api/fermentations")
 
 
 def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
+    # Upgrade #16 records in place, retaining contact times, commands and pending OFF.
+    for cycle in db.fermentations.find({"control_mode": "heating", "devices": {"$exists": False}}):
+        device = {
+            "id": cycle["heater_id"],
+            "name": cycle["heater_name"],
+            "capability": "heating",
+            "role": "heater",
+        }
+        reserved = [device["id"]] if cycle["heater_reserved"] else []
+        control = cycle["regulation"]
+        db.fermentations.update_one(
+            {"_id": cycle["_id"], "devices": {"$exists": False}},
+            {
+                "$set": {
+                    "devices": [device],
+                    "reserved_device_ids": reserved,
+                    "thermal_reserved": bool(reserved),
+                    "regulation": {
+                        **control,
+                        "devices": {device["id"]: {**control, "reserved": bool(reserved)}},
+                    },
+                },
+                "$inc": {"control_revision": 1},
+            },
+        )
+    db.fermentations.create_index(
+        "reserved_device_ids",
+        name="one_reservation_per_thermal_device",
+        unique=True,
+        partialFilterExpression={"thermal_reserved": True},
+    )
     db.fermentations.create_index(
         "heater_id",
         name="one_reserved_fermentation_per_heater",
@@ -58,16 +89,27 @@ def public_fermentation(document: dict[str, Any]) -> dict[str, Any]:
             {
                 key: document[key]
                 for key in (
-                    "heater_id",
-                    "heater_name",
-                    "heater_reserved",
                     "temperature_min",
                     "temperature_max",
                     "hysteresis",
                     "regulation",
+                    "devices",
+                    "reserved_device_ids",
+                    "thermal_reserved",
                 )
             }
-            if document.get("control_mode") == "heating"
+            | {
+                key: document[key]
+                for key in (
+                    "heater_id",
+                    "heater_name",
+                    "heater_reserved",
+                    "cooler_id",
+                    "combined_id",
+                )
+                if key in document
+            }
+            if document.get("control_mode", "monitor_only") != "monitor_only"
             else {}
         ),
     }
@@ -135,13 +177,21 @@ def get_active(request: Request) -> dict[str, object]:
 def start_fermentation(payload: FermentationStart, request: Request) -> dict[str, object]:
     db = database(request)
     pill = require_pill(db, payload.pill_id)
-    heater = None
-    if payload.heater_id is not None:
-        heater = db.thermal_devices.find_one({"_id": payload.heater_id})
-        if heater is None:
+    devices = []
+    for role, capability in (("heater", "heating"), ("cooler", "cooling"), ("combined", "both")):
+        identifier = getattr(payload, role + "_id")
+        if identifier is None:
+            continue
+        device = db.thermal_devices.find_one({"_id": identifier})
+        if device is None:
             raise HTTPException(404, "Dispositivo termico non trovato.")
-        if heater["capability"] != "heating":
-            raise HTTPException(422, "Scegli un dispositivo di solo riscaldamento.")
+        if device["capability"] != capability:
+            raise HTTPException(
+                422, "Le capacità del dispositivo non sono compatibili con la funzione scelta."
+            )
+        devices.append(
+            {"id": device["_id"], "name": device["name"], "capability": capability, "role": role}
+        )
     if db.fermentations.find_one({"status": "active", "pill_id": pill["_id"]}):
         raise HTTPException(
             409,
@@ -164,13 +214,20 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
         "ended_at": None,
         "status": "active",
     }
-    if heater is not None:
+    if devices:
         document.update(
             {
-                "control_mode": "heating",
-                "heater_id": heater["_id"],
-                "heater_name": heater["name"],
-                "heater_reserved": True,
+                "control_mode": payload.control_mode,
+                "heater_id": payload.heater_id,
+                "heater_name": next(
+                    (device["name"] for device in devices if device["role"] == "heater"), None
+                ),
+                "heater_reserved": payload.heater_id is not None,
+                "cooler_id": payload.cooler_id,
+                "combined_id": payload.combined_id,
+                "devices": devices,
+                "reserved_device_ids": [device["id"] for device in devices],
+                "thermal_reserved": True,
                 "temperature_min": payload.temperature_min,
                 "temperature_max": payload.temperature_max,
                 "hysteresis": payload.hysteresis,
@@ -189,6 +246,18 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
             }
         )
     try:
+        if devices:
+            document["regulation"]["devices"] = {
+                device["id"]: {
+                    **{
+                        key: value
+                        for key, value in document["regulation"].items()
+                        if key != "devices"
+                    },
+                    "reserved": True,
+                }
+                for device in devices
+            }
         db.fermentations.insert_one(document)
     except DuplicateKeyError:
         raise HTTPException(
@@ -231,7 +300,12 @@ def end_fermentation(identifier: str, request: Request) -> dict[str, object]:
                     "control_revision": {"$add": [{"$ifNull": ["$control_revision", 0]}, 1]},
                     "regulation": {
                         "$cond": [
-                            {"$eq": ["$control_mode", "heating"]},
+                            {
+                                "$ne": [
+                                    {"$ifNull": ["$control_mode", "monitor_only"]},
+                                    "monitor_only",
+                                ]
+                            },
                             {
                                 "$mergeObjects": [
                                     "$regulation",
@@ -239,6 +313,27 @@ def end_fermentation(identifier: str, request: Request) -> dict[str, object]:
                                         "desired_mode": "off",
                                         "status": "stopping",
                                         "needs_off": True,
+                                        "devices": {
+                                            "$arrayToObject": {
+                                                "$map": {
+                                                    "input": {
+                                                        "$objectToArray": {
+                                                            "$ifNull": ["$regulation.devices", {}]
+                                                        }
+                                                    },
+                                                    "as": "device",
+                                                    "in": {
+                                                        "k": "$$device.k",
+                                                        "v": {
+                                                            "$mergeObjects": [
+                                                                "$$device.v",
+                                                                {"desired_mode": "off"},
+                                                            ]
+                                                        },
+                                                    },
+                                                }
+                                            }
+                                        },
                                     },
                                 ]
                             },

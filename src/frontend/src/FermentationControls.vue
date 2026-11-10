@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import HeatingStatus from './HeatingStatus.vue'
+import ThermalRegulationStatus from './ThermalRegulationStatus.vue'
 import type { Fermentation } from './fermentations'
 import type { PillSnapshot } from './readings'
 import type { ThermalDevice } from './thermalDevices'
@@ -17,42 +17,68 @@ const name = ref('')
 const pillId = ref('')
 const mode = ref('monitor_only')
 const heaterId = ref('')
+const coolerId = ref('')
+const combinedId = ref('')
 const minimum = ref('18')
 const maximum = ref('22')
 const hysteresis = ref('0.5')
-const heaters = ref<ThermalDevice[]>([])
-const {
-  error: heaterError,
-  run: readHeaters,
-  refresh: refreshHeaters,
-} = useLatestRequest(
-  'Non è stato possibile recuperare i dispositivi di riscaldamento. Riprova.',
+const thermalDevices = ref<ThermalDevice[]>([])
+const heaters = computed(() =>
+  thermalDevices.value.filter((device) => device.capability === 'heating'),
 )
-let heaterTimer: ReturnType<typeof setInterval> | undefined
-async function loadHeaters() {
-  await readHeaters(
+const coolers = computed(() =>
+  thermalDevices.value.filter((device) => device.capability === 'cooling'),
+)
+const combined = computed(() =>
+  thermalDevices.value.filter((device) => device.capability === 'both'),
+)
+const usesHeater = computed(() =>
+  ['heating', 'heating_cooling'].includes(mode.value),
+)
+const usesCooler = computed(() =>
+  ['cooling', 'heating_cooling'].includes(mode.value),
+)
+watch(thermalDevices, () => {
+  for (const selected of [heaterId, coolerId, combinedId]) {
+    if (
+      selected.value &&
+      !thermalDevices.value.some(
+        (device) => device.id === selected.value && device.available,
+      )
+    )
+      selected.value = ''
+  }
+})
+const {
+  error: devicesError,
+  run: readDevices,
+  refresh: refreshDevices,
+} = useLatestRequest(
+  'Non è stato possibile recuperare i dispositivi termici. Riprova.',
+)
+let deviceTimer: ReturnType<typeof setInterval> | undefined
+async function loadDevices() {
+  await readDevices(
     async (signal) => {
       const response = await fetch('/api/thermal-devices', {
         signal,
         cache: 'no-store',
       })
-      if (!response.ok) throw new Error('Heaters unavailable')
+      if (!response.ok) throw new Error('Devices unavailable')
       return (await response.json()) as { devices: ThermalDevice[] }
     },
     (payload) => {
-      heaters.value = payload.devices.filter(
-        (device) => device.capability === 'heating',
-      )
+      thermalDevices.value = payload.devices
     },
     true,
   )
 }
 onMounted(() => {
   if (props.fermentation && !props.allowStart) return
-  void loadHeaters()
-  heaterTimer = setInterval(() => refreshHeaters(loadHeaters), 2000)
+  void loadDevices()
+  deviceTimer = setInterval(() => refreshDevices(loadDevices), 2000)
 })
-onUnmounted(() => clearInterval(heaterTimer))
+onUnmounted(() => clearInterval(deviceTimer))
 const availablePills = computed(() =>
   props.pills.filter((pill) => pill.available),
 )
@@ -78,6 +104,22 @@ async function submit(action: 'start' | 'end') {
     error.value = 'Inserisci un nome per la fermentazione.'
     return
   }
+  if (action === 'start' && mode.value !== 'monitor_only') {
+    const low = Number(minimum.value),
+      high = Number(maximum.value),
+      margin = Number(hysteresis.value)
+    if (
+      ![low, high, margin].every(Number.isFinite) ||
+      low < -273.15 ||
+      low >= high ||
+      margin <= 0 ||
+      low + margin > high
+    ) {
+      error.value =
+        'Minimo inferiore al massimo, isteresi positiva e spegnimento entro la fascia richiesti.'
+      return
+    }
+  }
   const current = props.fermentation
   if (action === 'end' && !current) return
   saving.value = true
@@ -95,9 +137,17 @@ async function submit(action: 'start' | 'end') {
                 name: name.value.trim(),
                 pill_id: pillId.value,
                 control_mode: mode.value,
-                ...(mode.value === 'heating'
+                ...(mode.value !== 'monitor_only'
                   ? {
-                      heater_id: heaterId.value,
+                      ...(usesHeater.value
+                        ? { heater_id: heaterId.value }
+                        : {}),
+                      ...(usesCooler.value
+                        ? { cooler_id: coolerId.value }
+                        : {}),
+                      ...(mode.value === 'combined'
+                        ? { combined_id: combinedId.value }
+                        : {}),
                       temperature_min: Number(minimum.value),
                       temperature_max: Number(maximum.value),
                       hysteresis: Number(hysteresis.value),
@@ -154,7 +204,7 @@ async function submit(action: 'start' | 'end') {
         {{ saving ? 'Operazione in corso…' : 'Termina fermentazione' }}
       </button>
     </div>
-    <HeatingStatus v-if="fermentation" :fermentation="fermentation" />
+    <ThermalRegulationStatus v-if="fermentation" :fermentation="fermentation" />
     <form
       v-if="!fermentation || allowStart"
       class="fermentation-form"
@@ -183,16 +233,15 @@ async function submit(action: 'start' | 'end') {
         >
           <option value="monitor_only">Solo monitoraggio</option>
           <option value="heating">Riscaldamento</option>
-          <option disabled value="cooling">
-            Raffreddamento (non ancora disponibile)
+          <option value="cooling">Raffreddamento</option>
+          <option value="heating_cooling">
+            Riscaldamento e raffreddamento separati
           </option>
-          <option disabled value="combined">
-            Combinazioni (non ancora disponibili)
-          </option>
+          <option value="combined">Dispositivo combinato</option>
         </select>
       </div>
-      <template v-if="mode === 'heating'">
-        <div>
+      <template v-if="mode !== 'monitor_only'">
+        <div v-if="usesHeater">
           <label for="fermentation-heater">Dispositivo di riscaldamento</label>
           <select
             id="fermentation-heater"
@@ -210,9 +259,9 @@ async function submit(action: 'start' | 'end') {
               {{ heater.name }}{{ heater.available ? '' : ' · Riservato' }}
             </option>
           </select>
-          <p v-if="heaterError" role="alert" class="error">
-            {{ heaterError }}
-            <button type="button" class="text-button" @click="loadHeaters">
+          <p v-if="devicesError" role="alert" class="error">
+            {{ devicesError }}
+            <button type="button" class="text-button" @click="loadDevices">
               Riprova dispositivi
             </button>
           </p>
@@ -224,6 +273,50 @@ async function submit(action: 'start' | 'end') {
             pagina Dispositivi.
           </p>
         </div>
+        <div v-if="usesCooler">
+          <label for="fermentation-cooler">Dispositivo di raffreddamento</label>
+          <select
+            id="fermentation-cooler"
+            v-model="coolerId"
+            required
+            :disabled="saving || loading"
+          >
+            <option disabled value="">Scegli un dispositivo</option>
+            <option
+              v-for="device in coolers"
+              :key="device.id"
+              :value="device.id"
+              :disabled="!device.available"
+            >
+              {{ device.name }}{{ device.available ? '' : ' · Riservato' }}
+            </option>
+          </select>
+        </div>
+        <div v-if="mode === 'combined'">
+          <label for="fermentation-combined">Dispositivo combinato</label>
+          <select
+            id="fermentation-combined"
+            v-model="combinedId"
+            required
+            :disabled="saving || loading"
+          >
+            <option disabled value="">Scegli un dispositivo</option>
+            <option
+              v-for="device in combined"
+              :key="device.id"
+              :value="device.id"
+              :disabled="!device.available"
+            >
+              {{ device.name }}{{ device.available ? '' : ' · Riservato' }}
+            </option>
+          </select>
+        </div>
+        <p v-if="devicesError && !usesHeater" class="error" role="alert">
+          {{ devicesError }}
+          <button type="button" class="text-button" @click="loadDevices">
+            Riprova dispositivi
+          </button>
+        </p>
         <div>
           <label for="temperature-min">Temperatura minima (°C)</label>
           <input

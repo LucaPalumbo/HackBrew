@@ -24,7 +24,7 @@ from hackbrew.history import initialize_history, record_reading
 from hackbrew.models import GatewayReading
 from hackbrew.pills import initialize_pills, pill_snapshots
 from hackbrew.pills import router as pills_router
-from hackbrew.regulation import regulate_heating
+from hackbrew.regulation import regulate_temperature
 from hackbrew.settings import router as settings_router
 from hackbrew.settings import timeout_configuration
 from hackbrew.storage import database
@@ -48,7 +48,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         initialize_history(application.state.database)
         timeout_configuration(application.state.database)
         synchronization = asyncio.create_task(synchronize_timeouts(application.state.database))
-        regulation = asyncio.create_task(regulate_heating(application.state.database))
+        regulation = asyncio.create_task(regulate_temperature(application.state.database))
         try:
             yield
         finally:
@@ -122,7 +122,8 @@ def latest_reading(request: Request, pill_id: str | None = None) -> dict[str, ob
         "regulation_revision": sum(
             row.get("control_revision", 0)
             for row in db.fermentations.find(
-                {"control_mode": "heating"}, {"control_revision": True}
+                {"control_mode": {"$in": ["heating", "cooling", "heating_cooling", "combined"]}},
+                {"control_revision": True},
             )
         ),
         "last_received_at": selected["last_received_at"] if selected else None,

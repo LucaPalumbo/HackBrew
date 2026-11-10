@@ -38,7 +38,9 @@ def initialize_thermal_devices(db: Database[dict[str, Any]]) -> None:
 
 
 def public_device(document: dict[str, Any], db: Database[dict[str, Any]]) -> dict[str, Any]:
-    reservation = db.fermentations.find_one({"heater_id": document["_id"], "heater_reserved": True})
+    reservation = db.fermentations.find_one(
+        {"reserved_device_ids": document["_id"], "thermal_reserved": True}
+    )
     return {
         "id": document["_id"],
         "available": reservation is None,

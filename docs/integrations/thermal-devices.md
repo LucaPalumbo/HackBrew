@@ -1,6 +1,6 @@
 # Dispositivi termici e contratto HTTP provvisorio
 
-La [#14](https://github.com/LucaPalumbo/HackBrew/issues/14) introduce registrazione e osservazione dei dispositivi. La [#15](https://github.com/LucaPalumbo/HackBrew/issues/15) aggiunge impostazione globale e sincronizzazione del timeout. La [#16](https://github.com/LucaPalumbo/HackBrew/issues/16) abilita la [regolazione del riscaldamento](heating-regulation.md), compreso termine definitivo e OFF pendente. Questa versione non offre un override manuale; raffreddamento e combinazioni restano nella #17.
+Le #14 e #15 introducono registro, osservazioni e timeout globale. Le #16 e #17 abilitano la [regolazione termica](thermal-regulation.md): heater, cooler, coppie separate e combinato, con termine definitivo e OFF pendenti. Non esiste un override manuale. Il pulsante Verifica collegamento continua a effettuare soltanto una lettura.
 
 ## Registrazione e verifica nell'applicazione
 
@@ -18,7 +18,7 @@ In caso di HTTP fallito, risposta malformata, capacità incompatibili o timeout 
 
 Una verifica HTTP più vecchia e lenta non può sovrascrivere una verifica iniziata successivamente. Le revisioni delle verifiche sono persistite e aggiornate atomicamente. HTTP 404 indica un identificatore sconosciuto, HTTP 422 input non valido. Se MongoDB è indisponibile, le API rispondono HTTP 503 senza confermare una registrazione o un risultato non salvato.
 
-L'adattatore sostituibile è `src/hackbrew/thermal_client.py`: racchiude GET/PUT, percorsi, timeout di trasporto e validazione del protocollo. L'applicazione legge lo stato, sincronizza il timeout e usa i comandi assoluti per la regolazione del riscaldamento. Il pulsante Verifica collegamento continua a effettuare soltanto una lettura.
+L'adattatore sostituibile è `src/hackbrew/thermal_client.py`: racchiude GET/PUT, percorsi, timeout di trasporto e validazione del protocollo. L'applicazione legge lo stato, sincronizza il timeout e usa i comandi assoluti per la regolazione termica. Il pulsante Verifica collegamento continua a effettuare soltanto una lettura.
 
 ## Configurazione globale e sincronizzazione
 
@@ -28,7 +28,7 @@ La risposta separa valore e revisione globali desiderati da `applied_revision`, 
 
 Un task del backend riconcilia tutti i dispositivi anche senza browser aperto, usando revisioni e identità dei comandi persistite. Un aggiornamento obsoleto non può confermare la nuova configurazione. Errori di trasporto/protocollo vengono esposti e ritentati; al ritorno del dispositivo viene inviata la revisione corrente. Un salvataggio globale non attende gli attuatori e non ne conferma l'applicazione. Un errore MongoDB produce HTTP 503.
 
-La stessa durata vale per server e dispositivi, ma il server misura dall'ultima ricezione dati valida **per pillola**, il dispositivo dall'ultimo comando **di controllo** valido. Polling, GET dello stato e aggiornamenti della configurazione non rinnovano questi istanti. Per i cicli con riscaldamento, la scadenza sul server richiede OFF e sospende la regolazione lasciando la fermentazione attiva.
+La stessa durata vale per server e dispositivi, ma il server misura dall'ultima ricezione dati valida **per pillola**, il dispositivo dall'ultimo comando **di controllo** valido. Polling, GET dello stato e aggiornamenti della configurazione non rinnovano questi istanti. Per i cicli con regolazione termica, la scadenza sul server richiede OFF e sospende la regolazione lasciando la fermentazione attiva.
 
 ## Contratto del dispositivo, versione 1
 

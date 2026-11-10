@@ -2,8 +2,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import MeasurementChart from './MeasurementChart.vue'
 import FermentationControls from './FermentationControls.vue'
-import HeatingStatus from './HeatingStatus.vue'
-import type { Fermentation } from './fermentations'
+import ThermalRegulationStatus from './ThermalRegulationStatus.vue'
+import { controlModeNames, type Fermentation } from './fermentations'
 import type { Reading } from './readings'
 import { useLatestRequest } from './useLatestRequest'
 import { measurements, exactMeasurement } from './measurements'
@@ -155,7 +155,7 @@ watch(
       :loading="loading"
       @changed="ended"
     />
-    <HeatingStatus
+    <ThermalRegulationStatus
       v-if="fermentation?.status === 'concluded'"
       :fermentation="fermentation"
     />
@@ -170,11 +170,7 @@ watch(
     <p v-if="fermentation" class="history-period">
       {{ fermentation.name }} ·
       {{ fermentation.status === 'concluded' ? 'Conclusa' : 'In corso' }} ·
-      {{
-        fermentation.control_mode === 'monitor_only'
-          ? 'Solo monitoraggio'
-          : 'Riscaldamento'
-      }}<br />
+      {{ controlModeNames[fermentation.control_mode] }}<br />
       {{ fermentation.pill_name }} · {{ fermentation.pill_mac }}<br />
       <time :datetime="fermentation.started_at">{{
         dates.format(new Date(fermentation.started_at))

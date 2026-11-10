@@ -29,7 +29,8 @@ export const capabilityNames: Record<Capability, string> = {
   cooling: 'Raffreddamento',
   both: 'Riscaldamento e raffreddamento',
 }
-export const modeNames: Record<ThermalMode, string> = {
+export const modeNames: Record<ThermalMode | 'unknown', string> = {
+  unknown: 'Sconosciuto',
   off: 'Spento',
   heating: 'Riscaldamento',
   cooling: 'Raffreddamento',

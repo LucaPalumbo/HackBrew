@@ -1,8 +1,12 @@
-"""Persistent heating control, physical reconciliation and definitive shutdown."""
+"""Coordinated thermal control with persistent commands and physical reconciliation."""
 
 import asyncio
+import copy
 import logging
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -17,27 +21,6 @@ from hackbrew.thermal_contract import ControlCommand, DeviceState, Mode
 logger = logging.getLogger(__name__)
 
 
-def save_control(
-    db: Database[dict[str, Any]],
-    cycle: dict[str, Any],
-    control: dict[str, Any],
-    *,
-    released: bool = False,
-) -> dict[str, Any] | None:
-    return db.fermentations.find_one_and_update(
-        {
-            "_id": cycle["_id"],
-            "control_revision": cycle["control_revision"],
-            "heater_reserved": True,
-        },
-        {
-            "$set": {"regulation": control, "heater_reserved": not released},
-            "$inc": {"control_revision": 1},
-        },
-        return_document=ReturnDocument.AFTER,
-    )
-
-
 def command_confirmed(state: DeviceState, command: ControlCommand | None) -> bool:
     return bool(
         command is not None
@@ -50,9 +33,7 @@ def command_confirmed(state: DeviceState, command: ControlCommand | None) -> boo
 
 
 def usable_temperature(
-    db: Database[dict[str, Any]],
-    cycle: dict[str, Any],
-    timeout: float,
+    db: Database[dict[str, Any]], cycle: dict[str, Any], timeout: float
 ) -> tuple[float | None, Literal["waiting", "suspended"] | None, str | None]:
     latest = db.latest_reading.find_one({"_id": cycle["pill_id"]})
     if latest is None or latest.get("reading", {}).get("timestamp", -1) < cycle["started_at"]:
@@ -63,17 +44,18 @@ def usable_temperature(
 
 
 def make_command(
-    cycle: dict[str, Any],
+    owner: str,
+    control: dict[str, Any],
     state: DeviceState,
     mode: Mode,
     configuration: dict[str, Any],
 ) -> ControlCommand:
-    previous = cycle["regulation"].get("command")
+    previous = control.get("command")
     accepted = state.accepted_command
     epoch = max(
         previous["ownership_epoch"] if previous else 0, accepted.ownership_epoch if accepted else 0
     )
-    owned = accepted is not None and accepted.ownership_id == cycle["_id"]
+    owned = accepted is not None and accepted.ownership_id == owner
     pending_claim = (
         previous
         and previous["boot_id"] == state.boot_id
@@ -93,7 +75,7 @@ def make_command(
         boot_id=state.boot_id,
         command_id=str(uuid4()),
         ownership_epoch=epoch,
-        ownership_id=cycle["_id"],
+        ownership_id=owner,
         sequence=sequence,
         mode=mode,
         config_revision=configuration["revision"],
@@ -101,214 +83,419 @@ def make_command(
     )
 
 
-def observe(control: dict[str, Any], state: DeviceState) -> None:
-    control.update(
-        actual_mode=state.actual_mode,
-        confirmed_at=state.confirmed_at,
-        device_id=state.device_id,
-        error=None,
-    )
+def exchange_all(
+    actions: dict[str, Callable[[], DeviceState]],
+) -> dict[str, DeviceState | ActuatorError]:
+    def exchange(action: Callable[[], DeviceState]) -> DeviceState | ActuatorError:
+        try:
+            return action()
+        except ActuatorError as error:
+            return error
+
+    if not actions:
+        return {}
+    if len(actions) == 1:
+        identifier, action = next(iter(actions.items()))
+        return {identifier: exchange(action)}
+    with ThreadPoolExecutor(max_workers=len(actions)) as pool:
+        return dict(zip(actions, pool.map(exchange, actions.values()), strict=True))
 
 
-def finish_observation(
-    db: Database[dict[str, Any]],
-    cycle: dict[str, Any],
-    control: dict[str, Any],
-    state: DeviceState,
-) -> None:
-    command = ControlCommand.model_validate(control["command"]) if control.get("command") else None
-    confirmed = command_confirmed(state, command)
-    released = cycle["status"] == "concluded" and control["desired_mode"] == "off" and confirmed
-    if released:
-        control.update(status="stopped", reason="Spegnimento confermato.")
-    elif cycle["status"] == "concluded":
-        control.update(status="stopping", reason="Spegnimento in attesa di conferma.")
-    elif control["reason"] is None:
-        control["status"] = (
-            ("heating" if control["desired_mode"] == "heating" else "idle")
-            if confirmed
-            else "pending"
+class ThermalControl:
+    """One atomic ownership/control snapshot coordinates all functions of a cycle."""
+
+    def __init__(self, db: Database[dict[str, Any]], cycle: dict[str, Any]) -> None:
+        self.db = db
+        self.cycle = cycle
+        self.configuration = timeout_configuration(db)
+        self.control = copy.deepcopy(cycle["regulation"])
+        self.assignments = {device["id"]: device for device in cycle["devices"]}
+        self.active = list(cycle["reserved_device_ids"])
+        fields = (
+            "command",
+            "last_sent_at",
+            "desired_mode",
+            "actual_mode",
+            "confirmed_at",
+            "error",
+            "device_id",
+            "reserved",
         )
-    save_control(db, cycle, control, released=released)
-
-
-def request_off_after_failure(
-    db: Database[dict[str, Any]],
-    cycle: dict[str, Any],
-    control: dict[str, Any],
-    client: ThermalDeviceClient,
-    configuration: dict[str, Any],
-    error: ActuatorError,
-) -> None:
-    control.update(
-        status="stopping" if cycle["status"] == "concluded" else "suspended",
-        desired_mode="off",
-        actual_mode=None,
-        confirmed_at=None,
-        needs_off=True,
-        error=str(error),
-        reason="Comunicazione del heater non confermata; richiesto OFF.",
-    )
-    previous = control.get("command")
-    if previous is None:
-        save_control(db, cycle, control)
-        return  # No observed boot identity: reconcile before issuing a command.
-    command = ControlCommand.model_validate(previous)
-    if command.mode != "off" or command.config_revision != configuration["revision"]:
-        command = command.model_copy(
-            update={
-                "command_id": str(uuid4()),
-                "sequence": command.sequence + 1,
-                "mode": "off",
-                "config_revision": configuration["revision"],
-                "timeout_seconds": configuration["communication_timeout_seconds"],
+        self.devices = {
+            identifier: {
+                key: value
+                for key, value in self.control["devices"][identifier].items()
+                if key in fields
             }
-        )
-    control["command"] = command.model_dump()
-    saved = save_control(db, cycle, control)
-    if saved is None:
-        return
-    try:
-        state = client.control(command)
+            for identifier in self.assignments
+        }
+        self.control["devices"] = self.devices
+        self.clients: dict[str, ThermalDeviceClient] = {}
+        self.states: dict[str, DeviceState] = {}
+        self.errors: dict[str, str] = {}
+        self.cancelled = False
+        for identifier in self.active:
+            device = db.thermal_devices.find_one({"_id": identifier})
+            if device is not None:
+                self.clients[identifier] = ThermalDeviceClient(device["base_url"])
+            else:
+                self.record_error(identifier, ActuatorError("Dispositivo termico non registrato."))
+
+    def record_error(self, identifier: str, error: ActuatorError) -> None:
+        self.errors[identifier] = str(error)
+        self.states.pop(identifier, None)
+        self.devices[identifier].update(actual_mode=None, confirmed_at=None, error=str(error))
+
+    def observe(
+        self, identifier: str, state: DeviceState, command: ControlCommand | None = None
+    ) -> None:
+        control = self.devices[identifier]
         if (
-            state.boot_id != command.boot_id
-            or state.device_id != control.get("device_id")
-            or state.capability != "heating"
+            state.capability != self.assignments[identifier]["capability"]
+            or (control.get("device_id") and control["device_id"] != state.device_id)
+            or (command is not None and state.boot_id != command.boot_id)
         ):
-            raise ActuatorError("Conferma OFF riferita a un altro dispositivo o avvio.")
-        observe(control, state)
-        control.update(error=str(error), last_sent_at=datetime.now(UTC))
-        finish_observation(db, saved, control, state)
-    except ActuatorError as failure:
-        control["error"] = str(failure)
-        save_control(db, saved, control)
+            raise ActuatorError("Identità, avvio o capacità del dispositivo discordanti.")
+        self.states[identifier] = state
+        self.errors.pop(identifier, None)
+        control.update(
+            actual_mode=state.actual_mode,
+            confirmed_at=state.confirmed_at,
+            device_id=state.device_id,
+            error=None,
+        )
+        if state.actual_mode is None:
+            self.errors[identifier] = "Conferma fisica del dispositivo indisponibile."
+            control["error"] = self.errors[identifier]
 
+    def read_devices(self) -> None:
+        for identifier, result in exchange_all(
+            {identifier: client.read_state for identifier, client in self.clients.items()}
+        ).items():
+            try:
+                if isinstance(result, ActuatorError):
+                    raise result
+                self.observe(identifier, result)
+            except ActuatorError as error:
+                self.record_error(identifier, error)
 
-def reconcile_cycle(db: Database[dict[str, Any]], identifier: str) -> None:
-    cycle = db.fermentations.find_one({"_id": identifier, "heater_reserved": True})
-    if cycle is None:
-        return
-    device = db.thermal_devices.find_one({"_id": cycle["heater_id"]})
-    if device is None:
-        return
-    configuration = timeout_configuration(db)
-    timeout = configuration["communication_timeout_seconds"]
-    control = dict(cycle["regulation"])
-    client = ThermalDeviceClient(device["base_url"])
-    try:
-        state = client.read_state()
-        if state.capability != "heating" or (
-            control.get("device_id") and control["device_id"] != state.device_id
+    def persist(self, remaining: list[str] | None = None) -> bool:
+        if self.cancelled:
+            return False
+        reserved = self.active if remaining is None else remaining
+        if (
+            self.control == self.cycle["regulation"]
+            and reserved == self.cycle["reserved_device_ids"]
         ):
-            raise ActuatorError("Identità o capacità del heater discordanti.")
+            return True
+        document = self.db.fermentations.find_one_and_update(
+            {
+                "_id": self.cycle["_id"],
+                "control_revision": self.cycle["control_revision"],
+                "thermal_reserved": True,
+            },
+            {
+                "$set": {
+                    "regulation": self.control,
+                    "reserved_device_ids": reserved,
+                    "thermal_reserved": bool(reserved),
+                    "heater_reserved": self.cycle.get("heater_id") in reserved,
+                },
+                "$inc": {"control_revision": 1},
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if document is None:
+            self.cancelled = True
+            return False
+        self.cycle = document
+        return True
+
+    def next_command(self, identifier: str, mode: Mode) -> ControlCommand | None:
+        control = self.devices[identifier]
+        state = self.states.get(identifier)
         previous = (
             ControlCommand.model_validate(control["command"]) if control.get("command") else None
         )
-        accepted = state.accepted_command
-        owned = accepted is not None and accepted.ownership_id == identifier
-        if (
-            not owned
-            or previous is None
-            or previous.boot_id != state.boot_id
-            or state.application_status in {"unknown", "timed_out"}
-        ):
-            control["needs_off"] = True
-        elif previous.mode == "off" and command_confirmed(state, previous):
-            control["needs_off"] = False
-        value, data_status, reason = usable_temperature(db, cycle, timeout)
-        mode: Mode = "off"
-        control["reason"] = reason
-        if cycle["status"] == "concluded":
-            control.update(
-                status="stopping", reason="Spegnimento in attesa di conferma.", needs_off=True
-            )
-        elif data_status is not None:
-            control.update(
-                status=data_status,
-                needs_off=True,
-            )
-        elif control["needs_off"]:
-            control.update(
-                status="suspended", reason="In attesa della conferma OFF prima della ripresa."
-            )
-        elif value is not None and (
-            value <= cycle["temperature_min"]
-            or (
-                value < cycle["temperature_min"] + cycle["hysteresis"]
-                and state.actual_mode == "heating"
-            )
-        ):
-            mode = "heating"
-        control["desired_mode"] = mode
-        observe(control, state)
-        interval = min(5.0, timeout / 3)
-        due = (
-            control["last_sent_at"] is None
-            or (datetime.now(UTC) - control["last_sent_at"]).total_seconds() >= interval
-        )
+        duration = self.configuration["communication_timeout_seconds"]
         compatible = (
             previous is not None
-            and previous.boot_id == state.boot_id
             and previous.mode == mode
-            and previous.config_revision == configuration["revision"]
-            and previous.timeout_seconds == timeout
+            and previous.config_revision == self.configuration["revision"]
+            and previous.timeout_seconds == duration
         )
+        if state is None:
+            if previous is None:
+                return None
+            if compatible:
+                return previous
+            return previous.model_copy(
+                update={
+                    "command_id": str(uuid4()),
+                    "sequence": previous.sequence + 1,
+                    "mode": "off",
+                    "config_revision": self.configuration["revision"],
+                    "timeout_seconds": duration,
+                }
+            )
+        compatible = compatible and previous is not None and previous.boot_id == state.boot_id
+        if compatible and state.accepted_command is not None and previous is not None:
+            compatible = state.accepted_command.ownership_epoch <= previous.ownership_epoch and (
+                state.accepted_command.ownership_epoch != previous.ownership_epoch
+                or state.accepted_command.sequence <= previous.sequence
+            )
         if (
             compatible
             and not command_confirmed(state, previous)
             and state.application_status != "timed_out"
         ):
-            command = previous
-        elif not compatible or due or state.application_status == "timed_out":
-            command = make_command(cycle, state, mode, configuration)
-        else:
-            finish_observation(db, cycle, control, state)
-            return
-        assert command is not None
-        control["command"] = command.model_dump()
-        saved = save_control(db, cycle, control)
-        if saved is None:
-            return
-        cycle = saved
-        if (
-            db.fermentations.find_one(
-                {
-                    "_id": identifier,
-                    "control_revision": cycle["control_revision"],
-                    "heater_reserved": True,
-                }
+            return previous
+        due = control["last_sent_at"] is None or (
+            datetime.now(UTC) - control["last_sent_at"]
+        ).total_seconds() >= min(5.0, duration / 3)
+        if not compatible or due or state.application_status == "timed_out":
+            return make_command(self.cycle["_id"], control, state, mode, self.configuration)
+        return None
+
+    def send_modes(self, modes: Mapping[str, Mode]) -> bool:
+        commands: dict[str, ControlCommand] = {}
+        for identifier, mode in modes.items():
+            self.devices[identifier]["desired_mode"] = mode
+            command = self.next_command(identifier, mode)
+            if command is not None and identifier in self.clients:
+                self.devices[identifier]["command"] = command.model_dump()
+                commands[identifier] = command
+        if not self.persist():
+            return False
+        current = self.db.fermentations.find_one(
+            {
+                "_id": self.cycle["_id"],
+                "control_revision": self.cycle["control_revision"],
+                "thermal_reserved": True,
+            }
+        )
+        if current is None:
+            self.cancelled = True
+            return False
+        actions: dict[str, Callable[[], DeviceState]] = {
+            identifier: partial(self.clients[identifier].control, command)
+            for identifier, command in commands.items()
+        }
+        for identifier, result in exchange_all(actions).items():
+            try:
+                if isinstance(result, ActuatorError):
+                    raise result
+                self.observe(identifier, result, commands[identifier])
+                self.devices[identifier]["last_sent_at"] = datetime.now(UTC)
+            except ActuatorError as error:
+                self.record_error(identifier, error)
+        return not self.errors and not self.cancelled
+
+    def all_off_confirmed(self) -> bool:
+        return all(
+            identifier in self.states
+            and self.devices[identifier].get("command") is not None
+            and self.devices[identifier]["command"]["mode"] == "off"
+            and command_confirmed(
+                self.states[identifier],
+                ControlCommand.model_validate(self.devices[identifier]["command"]),
             )
-            is None
-        ):
-            return
-        response = client.control(command)
-        if (
-            response.boot_id != command.boot_id
-            or response.device_id != state.device_id
-            or response.capability != "heating"
-        ):
-            raise ActuatorError("Conferma riferita a un altro dispositivo o avvio.")
-        observe(control, response)
-        control["last_sent_at"] = datetime.now(UTC)
-        finish_observation(db, cycle, control, response)
-    except ActuatorError as error:
-        request_off_after_failure(db, cycle, control, client, configuration, error)
+            for identifier in self.active
+        )
+
+    def off_observed(self, identifier: str) -> bool:
+        state = self.states.get(identifier)
+        return bool(
+            state is not None
+            and state.actual_mode == "off"
+            and (state.accepted_command is None or state.accepted_command.mode == "off")
+        )
+
+    def opposite_requested(self, identifier: str, opposite: str) -> bool:
+        state = self.states[identifier]
+        accepted = state.accepted_command
+        previous = self.devices[identifier].get("command") or {}
+        return (
+            state.actual_mode == opposite
+            or (accepted is not None and accepted.mode == opposite)
+            or previous.get("mode") == opposite
+        )
+
+    def force_off(self, status: str, reason: str) -> None:
+        self.control.update(desired_mode="off", needs_off=True, status=status, reason=reason)
+        self.send_modes({identifier: "off" for identifier in self.active})
+
+    def actual_mode(self) -> Mode | None:
+        modes = [self.devices[identifier].get("actual_mode") for identifier in self.assignments]
+        if any(mode is None for mode in modes):
+            return None
+        enabled = {mode for mode in modes if mode != "off"}
+        if len(enabled) > 1:
+            return None
+        if "heating" in enabled:
+            return "heating"
+        if "cooling" in enabled:
+            return "cooling"
+        return "off"
+
+    def finish(self) -> None:
+        remaining = list(self.active)
+        if self.cycle["status"] == "concluded":
+            for identifier in self.active:
+                command = self.devices[identifier].get("command")
+                if (
+                    identifier in self.states
+                    and command is not None
+                    and command["mode"] == "off"
+                    and command_confirmed(
+                        self.states[identifier], ControlCommand.model_validate(command)
+                    )
+                ):
+                    remaining.remove(identifier)
+            self.control.update(
+                status="stopping" if remaining else "stopped",
+                desired_mode="off",
+                reason="Spegnimento in attesa di conferma."
+                if remaining
+                else "Spegnimento confermato.",
+            )
+        for identifier, control in self.devices.items():
+            control["reserved"] = identifier in remaining
+        actual = self.actual_mode()
+        dates = [
+            value
+            for control in self.devices.values()
+            if isinstance(value := control.get("confirmed_at"), datetime)
+        ]
+        self.control.update(
+            actual_mode=actual,
+            confirmed_at=min(dates)
+            if actual is not None and len(dates) == len(self.devices)
+            else None,
+            error="; ".join(
+                f"{self.assignments[identifier]['name']}: {error}"
+                for identifier, error in self.errors.items()
+            )
+            or None,
+        )
+        if self.cycle["status"] == "active" and self.control["reason"] is None:
+            confirmed = all(
+                identifier in self.states
+                and self.devices[identifier].get("command") is not None
+                and command_confirmed(
+                    self.states[identifier],
+                    ControlCommand.model_validate(self.devices[identifier]["command"]),
+                )
+                for identifier in self.active
+            )
+            self.control["status"] = (
+                (self.control["desired_mode"] if self.control["desired_mode"] != "off" else "idle")
+                if confirmed
+                else "pending"
+            )
+        if len(self.devices) == 1:
+            single = next(iter(self.devices.values()))
+            for key in ("command", "last_sent_at", "device_id"):
+                self.control[key] = single.get(key)
+        self.persist(remaining)
+
+    def run(self) -> None:
+        self.read_devices()
+        for identifier in self.active:
+            state = self.states.get(identifier)
+            previous = self.devices[identifier].get("command")
+            if (
+                state is None
+                or state.accepted_command is None
+                or state.accepted_command.ownership_id != self.cycle["_id"]
+                or previous is None
+                or previous["boot_id"] != state.boot_id
+                or state.application_status in {"unknown", "timed_out"}
+            ):
+                self.control["needs_off"] = True
+        if self.all_off_confirmed():
+            self.control["needs_off"] = False
+        value, data_status, reason = usable_temperature(
+            self.db, self.cycle, self.configuration["communication_timeout_seconds"]
+        )
+        if self.cycle["status"] == "concluded":
+            self.force_off("stopping", "Spegnimento in attesa di conferma.")
+        elif self.errors:
+            self.force_off(
+                "suspended", "Comunicazione dei dispositivi non confermata; richiesto OFF a tutti."
+            )
+        elif data_status is not None:
+            self.force_off(data_status, reason or "Temperatura non disponibile.")
+        elif self.control["needs_off"]:
+            self.force_off("suspended", "In attesa della conferma OFF prima della ripresa.")
+        else:
+            actual = self.actual_mode()
+            wanted: Mode = "off"
+            assert value is not None
+            heating = self.cycle["control_mode"] in {"heating", "heating_cooling", "combined"}
+            cooling = self.cycle["control_mode"] in {"cooling", "heating_cooling", "combined"}
+            if heating and (
+                value <= self.cycle["temperature_min"]
+                or (
+                    actual == "heating"
+                    and value < self.cycle["temperature_min"] + self.cycle["hysteresis"]
+                )
+            ):
+                wanted = "heating"
+            elif cooling and (
+                value >= self.cycle["temperature_max"]
+                or (
+                    actual == "cooling"
+                    and value > self.cycle["temperature_max"] - self.cycle["hysteresis"]
+                )
+            ):
+                wanted = "cooling"
+            opposite = "cooling" if wanted == "heating" else "heating"
+            if wanted != "off" and any(
+                self.opposite_requested(identifier, opposite) for identifier in self.active
+            ):
+                self.force_off(
+                    "suspended", "In attesa della conferma OFF prima del cambio di funzione."
+                )
+                self.finish()
+                return
+            self.control.update(desired_mode=wanted, reason=None)
+            targets: dict[str, Mode] = {
+                identifier: wanted
+                if self.assignments[identifier]["capability"] in {wanted, "both"}
+                else "off"
+                for identifier in self.active
+            }
+            off = {identifier: mode for identifier, mode in targets.items() if mode == "off"}
+            on = {identifier: mode for identifier, mode in targets.items() if mode != "off"}
+            successful = self.send_modes(off)
+            if not successful or any(not self.off_observed(identifier) for identifier in off):
+                self.force_off("suspended", "In attesa della conferma OFF; regolazione sospesa.")
+            elif on and not self.send_modes(on):
+                self.force_off("suspended", "Comando non confermato; richiesto OFF a tutti.")
+        self.finish()
 
 
-async def regulate_heating(db: Database[dict[str, Any]]) -> None:
+def reconcile_cycle(db: Database[dict[str, Any]], identifier: str) -> None:
+    cycle = db.fermentations.find_one({"_id": identifier, "thermal_reserved": True})
+    if cycle is not None:
+        ThermalControl(db, cycle).run()
+
+
+async def regulate_temperature(db: Database[dict[str, Any]]) -> None:
     jobs: dict[str, asyncio.Task[None]] = {}
 
     async def reconcile(identifier: str) -> None:
         while True:
             try:
                 reserved = await asyncio.to_thread(
-                    db.fermentations.find_one, {"_id": identifier, "heater_reserved": True}
+                    db.fermentations.find_one, {"_id": identifier, "thermal_reserved": True}
                 )
                 if reserved is None:
                     return
                 await asyncio.to_thread(reconcile_cycle, db, identifier)
             except PyMongoError as error:
-                logger.warning("Heating regulation unavailable: %s", error)
+                logger.warning("Thermal regulation unavailable: %s", error)
             await asyncio.sleep(0.05)
 
     try:
@@ -319,19 +506,19 @@ async def regulate_heating(db: Database[dict[str, Any]]) -> None:
                     try:
                         job.result()
                     except Exception:
-                        logger.exception("Heating reconciliation failed for %s", identifier)
+                        logger.exception("Thermal reconciliation failed for %s", identifier)
             try:
                 identifiers = await asyncio.to_thread(
                     lambda: [
                         d["_id"]
-                        for d in db.fermentations.find({"heater_reserved": True}, {"_id": True})
+                        for d in db.fermentations.find({"thermal_reserved": True}, {"_id": True})
                     ]
                 )
                 for identifier in identifiers:
                     if identifier not in jobs:
                         jobs[identifier] = asyncio.create_task(reconcile(identifier))
             except PyMongoError as error:
-                logger.warning("Heating regulation unavailable: %s", error)
+                logger.warning("Thermal regulation unavailable: %s", error)
             await asyncio.sleep(0.1)
     finally:
         for job in jobs.values():
