@@ -22,6 +22,12 @@ router = APIRouter(prefix="/api/fermentations")
 
 def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
     db.fermentations.create_index(
+        "heater_id",
+        name="one_reserved_fermentation_per_heater",
+        unique=True,
+        partialFilterExpression={"heater_reserved": True},
+    )
+    db.fermentations.create_index(
         "pill_id",
         name="one_active_fermentation_per_pill",
         unique=True,
@@ -47,7 +53,23 @@ def public_fermentation(document: dict[str, Any]) -> dict[str, Any]:
         "ended_at": datetime.fromtimestamp(document["ended_at"], UTC)
         if document["ended_at"] is not None
         else None,
-        "control_mode": "monitor_only",
+        "control_mode": document.get("control_mode", "monitor_only"),
+        **(
+            {
+                key: document[key]
+                for key in (
+                    "heater_id",
+                    "heater_name",
+                    "heater_reserved",
+                    "temperature_min",
+                    "temperature_max",
+                    "hysteresis",
+                    "regulation",
+                )
+            }
+            if document.get("control_mode") == "heating"
+            else {}
+        ),
     }
 
 
@@ -113,6 +135,13 @@ def get_active(request: Request) -> dict[str, object]:
 def start_fermentation(payload: FermentationStart, request: Request) -> dict[str, object]:
     db = database(request)
     pill = require_pill(db, payload.pill_id)
+    heater = None
+    if payload.heater_id is not None:
+        heater = db.thermal_devices.find_one({"_id": payload.heater_id})
+        if heater is None:
+            raise HTTPException(404, "Dispositivo termico non trovato.")
+        if heater["capability"] != "heating":
+            raise HTTPException(422, "Scegli un dispositivo di solo riscaldamento.")
     if db.fermentations.find_one({"status": "active", "pill_id": pill["_id"]}):
         raise HTTPException(
             409,
@@ -135,13 +164,37 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
         "ended_at": None,
         "status": "active",
     }
+    if heater is not None:
+        document.update(
+            {
+                "control_mode": "heating",
+                "heater_id": heater["_id"],
+                "heater_name": heater["name"],
+                "heater_reserved": True,
+                "temperature_min": payload.temperature_min,
+                "temperature_max": payload.temperature_max,
+                "hysteresis": payload.hysteresis,
+                "control_revision": 0,
+                "regulation": {
+                    "status": "waiting",
+                    "reason": "In attesa di temperatura utilizzabile.",
+                    "desired_mode": "off",
+                    "actual_mode": None,
+                    "confirmed_at": None,
+                    "command": None,
+                    "last_sent_at": None,
+                    "needs_off": True,
+                    "error": None,
+                },
+            }
+        )
     try:
         db.fermentations.insert_one(document)
     except DuplicateKeyError:
         raise HTTPException(
             409,
-            "C'è già una fermentazione attiva per questa pillola. "
-            "Terminala prima di riutilizzarla.",
+            "Pillola o dispositivo termico già riservato. "
+            "Attendi il termine e la conferma di spegnimento prima di riutilizzarlo.",
         ) from None
     return {"fermentation": public_fermentation(document)}
 
@@ -175,6 +228,23 @@ def end_fermentation(identifier: str, request: Request) -> dict[str, object]:
                 "$set": {
                     "status": "concluded",
                     "ended_at": {"$max": ["$started_at", monitoring_time()]},
+                    "control_revision": {"$add": [{"$ifNull": ["$control_revision", 0]}, 1]},
+                    "regulation": {
+                        "$cond": [
+                            {"$eq": ["$control_mode", "heating"]},
+                            {
+                                "$mergeObjects": [
+                                    "$regulation",
+                                    {
+                                        "desired_mode": "off",
+                                        "status": "stopping",
+                                        "needs_off": True,
+                                    },
+                                ]
+                            },
+                            "$$REMOVE",
+                        ]
+                    },
                 }
             }
         ],

@@ -97,7 +97,8 @@ onUnmounted(() => clearInterval(timer))
       contatto.
     </p>
     <p class="metric-caption">
-      La regolazione termica delle fermentazioni non è ancora attiva.
+      Il timeout si applica anche alla regolazione delle fermentazioni con
+      riscaldamento.
     </p>
     <p v-if="loading" role="status">Caricamento impostazioni…</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>

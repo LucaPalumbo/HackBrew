@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import type { FermentationSummary } from './fermentations'
+import { regulationNames, type FermentationSummary } from './fermentations'
+import { modeNames } from './thermalDevices'
 import { useLatestRequest } from './useLatestRequest'
 
 const props = defineProps<{
@@ -124,7 +125,31 @@ watch(
           <span class="card-pill"
             >{{ entry.pill_name }} · {{ entry.pill_mac }}</span
           >
-          <span class="card-mode">Solo monitoraggio</span>
+          <span class="card-mode">{{
+            entry.control_mode === 'monitor_only'
+              ? 'Solo monitoraggio'
+              : 'Riscaldamento'
+          }}</span>
+          <template v-if="entry.regulation">
+            <span class="card-mode">{{
+              regulationNames[entry.regulation.status]
+            }}</span>
+            <span class="card-pill"
+              >{{ entry.heater_name }} · Fascia {{ entry.temperature_min }}–{{
+                entry.temperature_max
+              }}
+              °C · Isteresi {{ entry.hysteresis }} °C</span
+            >
+            <span class="card-pill"
+              >Richiesto: {{ modeNames[entry.regulation.desired_mode] }} ·
+              Effettivo:
+              {{
+                entry.regulation.actual_mode === null
+                  ? 'Sconosciuto'
+                  : modeNames[entry.regulation.actual_mode]
+              }}</span
+            >
+          </template>
           <span v-if="entry.latest_reading" class="card-values">
             <span
               >Temperatura

@@ -24,6 +24,7 @@ from hackbrew.history import initialize_history, record_reading
 from hackbrew.models import GatewayReading
 from hackbrew.pills import initialize_pills, pill_snapshots
 from hackbrew.pills import router as pills_router
+from hackbrew.regulation import regulate_heating
 from hackbrew.settings import router as settings_router
 from hackbrew.settings import timeout_configuration
 from hackbrew.storage import database
@@ -47,11 +48,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         initialize_history(application.state.database)
         timeout_configuration(application.state.database)
         synchronization = asyncio.create_task(synchronize_timeouts(application.state.database))
+        regulation = asyncio.create_task(regulate_heating(application.state.database))
         try:
             yield
         finally:
             synchronization.cancel()
-            await asyncio.gather(synchronization, return_exceptions=True)
+            regulation.cancel()
+            await asyncio.gather(synchronization, regulation, return_exceptions=True)
 
 
 app = FastAPI(title="HackBrew", lifespan=lifespan)
@@ -116,6 +119,12 @@ def latest_reading(request: Request, pill_id: str | None = None) -> dict[str, ob
         **active,
         "communication_timeout_seconds": configuration["communication_timeout_seconds"],
         "settings_revision": configuration["revision"],
+        "regulation_revision": sum(
+            row.get("control_revision", 0)
+            for row in db.fermentations.find(
+                {"control_mode": "heating"}, {"control_revision": True}
+            )
+        ),
         "last_received_at": selected["last_received_at"] if selected else None,
         "server_time": now,
     }
@@ -133,6 +142,7 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
             return
         persisted_state = (
             snapshot["settings_revision"],
+            snapshot["regulation_revision"],
             snapshot["active_fermentations"],
             snapshot["pills"],
             snapshot["reading"],

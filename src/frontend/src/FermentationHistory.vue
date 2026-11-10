@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import MeasurementChart from './MeasurementChart.vue'
 import FermentationControls from './FermentationControls.vue'
+import HeatingStatus from './HeatingStatus.vue'
 import type { Fermentation } from './fermentations'
 import type { Reading } from './readings'
 import { useLatestRequest } from './useLatestRequest'
@@ -154,6 +155,10 @@ watch(
       :loading="loading"
       @changed="ended"
     />
+    <HeatingStatus
+      v-if="fermentation?.status === 'concluded'"
+      :fermentation="fermentation"
+    />
     <p
       v-if="notice"
       class="operation-notice"
@@ -164,8 +169,12 @@ watch(
     </p>
     <p v-if="fermentation" class="history-period">
       {{ fermentation.name }} ·
-      {{ fermentation.status === 'concluded' ? 'Conclusa' : 'In corso' }} · Solo
-      monitoraggio<br />
+      {{ fermentation.status === 'concluded' ? 'Conclusa' : 'In corso' }} ·
+      {{
+        fermentation.control_mode === 'monitor_only'
+          ? 'Solo monitoraggio'
+          : 'Riscaldamento'
+      }}<br />
       {{ fermentation.pill_name }} · {{ fermentation.pill_mac }}<br />
       <time :datetime="fermentation.started_at">{{
         dates.format(new Date(fermentation.started_at))

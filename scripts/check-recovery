@@ -14,6 +14,7 @@ compose() {
     docker compose --project-name "$recovery_project" -f "$recovery_root/compose.test.yaml" "$@"
 }
 
+compose up --detach --wait thermal-heating
 compose run --rm --no-deps -T --name "$recovery_container" \
     -e "HACKBREW_RECOVERY_DIR=$recovery_directory" tests python -m tests.check_recovery &
 recovery_driver_pid=$!
@@ -59,4 +60,18 @@ signal_phase app-down
 wait_phase recreate-services
 compose up --force-recreate --detach --wait app mongo
 signal_phase services-up
+wait_phase restart-heating-hysteresis
+compose kill --signal SIGKILL app
+compose up --detach --wait app
+signal_phase heating-hysteresis-up
+wait_phase stop-heating-server
+compose kill --signal SIGKILL app
+signal_phase heating-server-down
+wait_phase restart-heating-server
+compose up --detach --wait app
+signal_phase heating-server-up
+wait_phase restart-pending-off
+compose kill --signal SIGKILL app
+compose up --detach --wait app
+signal_phase pending-off-restarted
 wait "$recovery_driver_pid"

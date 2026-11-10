@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import HeatingStatus from './HeatingStatus.vue'
 import type { Fermentation } from './fermentations'
 import type { PillSnapshot } from './readings'
+import type { ThermalDevice } from './thermalDevices'
+import { useLatestRequest } from './useLatestRequest'
 
 const props = defineProps<{
   fermentation: Fermentation | null
@@ -12,6 +15,44 @@ const props = defineProps<{
 const emit = defineEmits<{ changed: [fermentation: Fermentation] }>()
 const name = ref('')
 const pillId = ref('')
+const mode = ref('monitor_only')
+const heaterId = ref('')
+const minimum = ref('18')
+const maximum = ref('22')
+const hysteresis = ref('0.5')
+const heaters = ref<ThermalDevice[]>([])
+const {
+  error: heaterError,
+  run: readHeaters,
+  refresh: refreshHeaters,
+} = useLatestRequest(
+  'Non è stato possibile recuperare i dispositivi di riscaldamento. Riprova.',
+)
+let heaterTimer: ReturnType<typeof setInterval> | undefined
+async function loadHeaters() {
+  await readHeaters(
+    async (signal) => {
+      const response = await fetch('/api/thermal-devices', {
+        signal,
+        cache: 'no-store',
+      })
+      if (!response.ok) throw new Error('Heaters unavailable')
+      return (await response.json()) as { devices: ThermalDevice[] }
+    },
+    (payload) => {
+      heaters.value = payload.devices.filter(
+        (device) => device.capability === 'heating',
+      )
+    },
+    true,
+  )
+}
+onMounted(() => {
+  if (props.fermentation && !props.allowStart) return
+  void loadHeaters()
+  heaterTimer = setInterval(() => refreshHeaters(loadHeaters), 2000)
+})
+onUnmounted(() => clearInterval(heaterTimer))
 const availablePills = computed(() =>
   props.pills.filter((pill) => pill.available),
 )
@@ -50,7 +91,19 @@ async function submit(action: 'start' | 'end') {
         headers: { 'Content-Type': 'application/json' },
         body:
           action === 'start'
-            ? JSON.stringify({ name: name.value.trim(), pill_id: pillId.value })
+            ? JSON.stringify({
+                name: name.value.trim(),
+                pill_id: pillId.value,
+                control_mode: mode.value,
+                ...(mode.value === 'heating'
+                  ? {
+                      heater_id: heaterId.value,
+                      temperature_min: Number(minimum.value),
+                      temperature_max: Number(maximum.value),
+                      hysteresis: Number(hysteresis.value),
+                    }
+                  : {}),
+              })
             : undefined,
         signal: AbortSignal.timeout(10000),
       },
@@ -101,6 +154,7 @@ async function submit(action: 'start' | 'end') {
         {{ saving ? 'Operazione in corso…' : 'Termina fermentazione' }}
       </button>
     </div>
+    <HeatingStatus v-if="fermentation" :fermentation="fermentation" />
     <form
       v-if="!fermentation || allowStart"
       class="fermentation-form"
@@ -120,6 +174,90 @@ async function submit(action: 'start' | 'end') {
           placeholder="Es. Prima IPA"
         />
       </div>
+      <div>
+        <label for="fermentation-mode">Modalità della fermentazione</label>
+        <select
+          id="fermentation-mode"
+          v-model="mode"
+          :disabled="saving || loading"
+        >
+          <option value="monitor_only">Solo monitoraggio</option>
+          <option value="heating">Riscaldamento</option>
+          <option disabled value="cooling">
+            Raffreddamento (non ancora disponibile)
+          </option>
+          <option disabled value="combined">
+            Combinazioni (non ancora disponibili)
+          </option>
+        </select>
+      </div>
+      <template v-if="mode === 'heating'">
+        <div>
+          <label for="fermentation-heater">Dispositivo di riscaldamento</label>
+          <select
+            id="fermentation-heater"
+            v-model="heaterId"
+            required
+            :disabled="saving || loading"
+          >
+            <option disabled value="">Scegli un dispositivo</option>
+            <option
+              v-for="heater in heaters"
+              :key="heater.id"
+              :value="heater.id"
+              :disabled="!heater.available"
+            >
+              {{ heater.name }}{{ heater.available ? '' : ' · Riservato' }}
+            </option>
+          </select>
+          <p v-if="heaterError" role="alert" class="error">
+            {{ heaterError }}
+            <button type="button" class="text-button" @click="loadHeaters">
+              Riprova dispositivi
+            </button>
+          </p>
+          <p
+            v-else-if="!heaters.some((heater) => heater.available)"
+            class="metric-caption"
+          >
+            Registra un dispositivo di solo riscaldamento disponibile nella
+            pagina Dispositivi.
+          </p>
+        </div>
+        <div>
+          <label for="temperature-min">Temperatura minima (°C)</label>
+          <input
+            id="temperature-min"
+            v-model="minimum"
+            type="number"
+            step="any"
+            required
+            :disabled="saving || loading"
+          />
+        </div>
+        <div>
+          <label for="temperature-max">Temperatura massima (°C)</label>
+          <input
+            id="temperature-max"
+            v-model="maximum"
+            type="number"
+            step="any"
+            required
+            :disabled="saving || loading"
+          />
+        </div>
+        <div>
+          <label for="temperature-hysteresis">Isteresi (°C)</label>
+          <input
+            id="temperature-hysteresis"
+            v-model="hysteresis"
+            type="number"
+            step="any"
+            required
+            :disabled="saving || loading"
+          />
+        </div>
+      </template>
       <div>
         <label for="fermentation-pill">Pillola della fermentazione</label>
         <select

@@ -211,6 +211,13 @@ onMounted(load)
       :aria-label="`Dispositivo termico ${device.name}`"
     >
       <h3>{{ device.name }}</h3>
+      <p>
+        {{
+          device.available
+            ? 'Disponibile'
+            : 'Riservato a una fermentazione, anche durante lo spegnimento pendente'
+        }}
+      </p>
       <p>{{ capabilityNames[device.capability] }}</p>
       <p class="fermentation-period thermal-address">{{ device.base_url }}</p>
       <p v-if="device.verification_status === 'unverified'">Non verificato</p>

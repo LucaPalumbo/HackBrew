@@ -9,6 +9,12 @@ x-thermal-simulator: &thermal-simulator
     retries: 20
 
 services:
+  thermal-heating-secondary:
+    <<: *thermal-simulator
+    environment:
+      THERMAL_SIM_CAPABILITY: heating
+      THERMAL_SIM_DEVICE_ID: simulator-heating-secondary
+
   thermal-heating:
     <<: *thermal-simulator
     environment:
@@ -77,6 +83,8 @@ services:
       app:
         condition: service_healthy
       thermal-heating:
+        condition: service_healthy
+      thermal-heating-secondary:
         condition: service_healthy
       thermal-cooling:
         condition: service_healthy

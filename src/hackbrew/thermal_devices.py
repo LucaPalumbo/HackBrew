@@ -37,9 +37,12 @@ def initialize_thermal_devices(db: Database[dict[str, Any]]) -> None:
     db.thermal_devices.create_index("base_url", unique=True)
 
 
-def public_device(document: dict[str, Any]) -> dict[str, Any]:
+def public_device(document: dict[str, Any], db: Database[dict[str, Any]]) -> dict[str, Any]:
+    reservation = db.fermentations.find_one({"heater_id": document["_id"], "heater_reserved": True})
     return {
         "id": document["_id"],
+        "available": reservation is None,
+        "reserved_fermentation_id": reservation["_id"] if reservation else None,
         **{key: value for key, value in document.items() if key not in {"_id", "check_revision"}},
     }
 
@@ -48,7 +51,7 @@ def public_device(document: dict[str, Any]) -> dict[str, Any]:
 def list_devices(request: Request) -> dict[str, object]:
     return {
         "devices": [
-            public_device(device)
+            public_device(device, database(request))
             for device in database(request).thermal_devices.find().sort([("name", 1), ("_id", 1)])
         ]
     }
@@ -75,7 +78,7 @@ def register_device(payload: ThermalDeviceRegistration, request: Request) -> dic
         database(request).thermal_devices.insert_one(document)
     except DuplicateKeyError:
         raise HTTPException(409, "Questo indirizzo HTTP è già registrato.") from None
-    return {"device": public_device(document)}
+    return {"device": public_device(document, database(request))}
 
 
 @router.post("/{identifier}/check")
@@ -132,4 +135,4 @@ def check_device(identifier: str, request: Request) -> dict[str, object]:
     )
     current = collection.find_one({"_id": identifier})
     assert current is not None
-    return {"device": public_device(current)}
+    return {"device": public_device(current, database(request))}

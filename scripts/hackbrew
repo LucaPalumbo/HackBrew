@@ -51,9 +51,9 @@ case "$action" in
         }
         trap cleanup EXIT
         if [ -n "${HACKBREW_GATEWAY_TOKEN:-}" ]; then
-            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml -f compose.bridge-auth.yaml build app tests thermal-heating thermal-cooling thermal-both
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml -f compose.bridge-auth.yaml build app tests thermal-heating thermal-heating-secondary thermal-cooling thermal-both
         else
-            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml build app tests thermal-heating thermal-cooling thermal-both
+            docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml build app tests thermal-heating thermal-heating-secondary thermal-cooling thermal-both
         fi
         docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
         if [ "$action" = test ]; then

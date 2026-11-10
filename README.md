@@ -2,7 +2,7 @@
 
 Dashboard web per registrare pillole Bluetooth e monitorare più fermentazioni della birra contemporaneamente. La pagina **Dispositivi** mostra la diagnostica live di ciascuna pillola e tutte le misure ricevute. Il monitoraggio permette di scegliere una pillola disponibile, avviare una fermentazione con un nome e terminarla manualmente, registrandone le letture in MongoDB. Le card riassumono attive e concluse e aprono il dettaglio del ciclo scelto. È sempre possibile consultare anche la diagnostica delle pillole.
 
-Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9), [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10) e [registrazione e verifica dei dispositivi termici](https://github.com/LucaPalumbo/HackBrew/issues/14). Il [grafico unico a linee](https://github.com/LucaPalumbo/HackBrew/issues/12) mostra tutte le misure; regolazione con attuatori e navigazione temporale avanzata appartengono ai ticket successivi.
+Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9), [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10) e [registrazione e verifica dei dispositivi termici](https://github.com/LucaPalumbo/HackBrew/issues/14). Il [grafico unico a linee](https://github.com/LucaPalumbo/HackBrew/issues/12) mostra tutte le misure; il riscaldamento automatico con timeout e termine definitivo è disponibile con la [#16](https://github.com/LucaPalumbo/HackBrew/issues/16). Raffreddamento, combinazioni e navigazione temporale avanzata appartengono ai ticket successivi.
 
 ## Requisiti e avvio
 
@@ -61,7 +61,7 @@ Il [bridge reale aggiornato](https://github.com/LucaPalumbo/RaptPillGateway-ble-
 
 La pagina **Dispositivi** permette anche di registrare nome, funzioni (**Riscaldamento**, **Raffreddamento** o entrambe) e indirizzo HTTP(S) dei dispositivi termici. L'indirizzo deve essere raggiungibile dal backend, senza credenziali, query o frammenti. **Verifica collegamento** legge lo stato effettivo, capacità e timeout/revisione applicati; un errore mostra **Stato sconosciuto**, conservando separatamente l'ultima conferma precedente. Registrazione e verifica non inviano comandi di accensione.
 
-`GET/POST /api/thermal-devices` elencano e registrano i dispositivi; `POST /api/thermal-devices/{id}/check` ne verifica il collegamento. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout globale parte da tre ore ed è configurabile nella pagina **Impostazioni**. La regolazione delle fermentazioni sarà abilitata dalla #16.
+`GET/POST /api/thermal-devices` elencano e registrano i dispositivi; `POST /api/thermal-devices/{id}/check` ne verifica il collegamento. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout globale parte da tre ore ed è configurabile nella pagina **Impostazioni**. La [regolazione del riscaldamento](docs/integrations/heating-regulation.md) è disponibile alla creazione della fermentazione.
 
 Per provare la pagina con un dispositivo simulato opzionale:
 
@@ -77,7 +77,7 @@ Apri **Impostazioni** (`http://localhost:8080/?page=settings`), inserisci il tim
 
 La pagina distingue il valore desiderato dalla revisione e durata effettivamente confermate da ciascun dispositivo. **Sincronizzazione in attesa** e **Errore di sincronizzazione** non significano aggiornamento riuscito: l'ultima conferma precedente rimane indicata separatamente. Il server ritenta in background anche senza browser aperto; al ritorno del dispositivo riconcilia la revisione corrente. Configurazione, revisione e comandi in sospeso sopravvivono al riavvio.
 
-La durata è simmetrica, con due origini distinte: sul server decorre dall'ultima **ricezione HTTP valida della pillola**, sul dispositivo dall'ultimo **comando di controllo valido**. Letture di stato, polling del bridge e sincronizzazioni della configurazione non rinnovano quei contatti. La configurazione usa un'operazione dedicata che preserva il modo del dispositivo; può anticipare la scadenza di un comando già ricevuto, ma non riattivare un dispositivo spento per timeout. Lo spegnimento degli attuatori in base alla scadenza dei dati della fermentazione sarà abilitato insieme alla regolazione nella #16.
+La durata è simmetrica, con due origini distinte: sul server decorre dall'ultima **ricezione HTTP valida della pillola**, sul dispositivo dall'ultimo **comando di controllo valido**. Letture di stato, polling del bridge e sincronizzazioni della configurazione non rinnovano quei contatti. La configurazione usa un'operazione dedicata che preserva il modo del dispositivo; può anticipare la scadenza di un comando già ricevuto, ma non riattivare un dispositivo spento per timeout. Per le fermentazioni con riscaldamento, l'assenza dati sospende la regolazione e richiede OFF senza concludere il ciclo.
 
 | API HackBrew | Risultato |
 | --- | --- |
@@ -160,9 +160,13 @@ Un messaggio non valido restituisce HTTP 422; una sorgente ben formata ma non re
 
 Inserisci un nome nel campo **Nome della fermentazione**, scegli esplicitamente una **Pillola della fermentazione** disponibile e premi **Avvia fermentazione**. Il nome non può essere vuoto o contenere soltanto spazi. Puoi avviare altri cicli scegliendo pillole diverse: quelle già assegnate sono indicate come occupate e non sono selezionabili. La scelta della pillola rimane fissa durante il ciclo. La modalità **Solo monitoraggio** non richiede attuatori, limiti di temperatura o isteresi.
 
+Scegli **Riscaldamento** per assegnare un dispositivo di solo riscaldamento e inserire minimo, massimo e isteresi in °C. Con 18–22 °C e isteresi 0,5, il heater parte a temperatura ≤ 18 e si spegne a temperatura ≥ 18,5; nella banda intermedia mantiene lo stato confermato. Senza dati utilizzabili resta OFF. Il controllo gira sul server e rinnova i comandi senza richiedere un browser aperto. Raffreddamento e combinazioni restano nella #17; le assegnazioni sono fisse. La [guida](docs/integrations/heating-regulation.md) documenta validazione, contratto di creazione, sospensione e ripresa.
+
 Le card mostrano nome, stato, pillola, ultima temperatura, densità SG, batteria, orario della misura e stato di monitoraggio. Le attive sono evidenziate e precedono le concluse; ricerca per nome e paginazione permettono di consultare l'elenco completo. Ogni card apre `?fermentation=<id>`, con stato, assegnazione, istanti e letture del ciclo. Indietro/Avanti, reload e collegamenti diretti mantengono la scelta. Le letture di altri cicli aggiornano le loro card senza cambiare il dettaglio selezionato. Un ciclo nuovo mostra un'attesa esplicita, anche se la pillola aveva già dati diagnostici.
 
 Apri una card attiva e premi **Termina fermentazione** per concludere soltanto quel ciclo: un messaggio conferma l'operazione, mentre nome, identificatore, avvio, termine e letture rimangono salvati. La pillola torna disponibile e le altre fermentazioni continuano. Il termine è definitivo e ripeterlo restituisce la stessa conclusione senza cambiare l'istante. Un nuovo ciclo non eredita letture precedenti. Le operazioni fallite mostrano un errore e permettono di riprovare; anche le altre schede del browser ricevono lo stato corrente.
+
+Per un ciclo con riscaldamento, il termine persiste subito la conclusione e richiede OFF. Anche con il dispositivo irraggiungibile il ciclo rimane concluso: il heater resta riservato, con **Spegnimento in attesa di conferma**, finché lo spegnimento non è confermato. Il server ritenta anche dopo un riavvio. Card e dettaglio distinguono modo richiesto, effettivo o sconosciuto; non deducono lo stato fisico dal solo invio del comando. `GET /api/thermal-devices` espone `available` e `reserved_fermentation_id`.
 
 | Operazione | Risultato |
 | --- | --- |
@@ -282,6 +286,8 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/browser/test_thermal_devices_dashboard.py
 ./scripts/hackbrew test tests/integration/test_settings.py tests/integration/test_timeout_configuration.py
 ./scripts/hackbrew test tests/browser/test_settings_dashboard.py
+./scripts/hackbrew test tests/integration/test_heating.py
+./scripts/hackbrew test tests/browser/test_heating_dashboard.py
 ```
 
 La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verifica la dashboard con Chromium tramite Playwright. I test configurano timeout brevi tramite l'API pubblica; il test browser avanza il tempo per verificare la scadenza senza attese reali. I test delle impostazioni coprono monitoraggi attivi, salvataggio fallito, revisioni concorrenti, conferme discordanti o ritardate, indisponibilità e recupero. I test live verificano anche la riconnessione dopo un'interruzione di rete. I test dello storico creano fermentazioni distinguibili, verificano selezione e reload e percorrono oltre 200 campioni senza perderne i valori. I test di consegna coprono invii ripetuti e concorrenti, valori distinti allo stesso timestamp, letture fuori ordine e confini tra due fermentazioni.
@@ -303,6 +309,8 @@ Ogni esecuzione crea un progetto Compose distinto con database e volume di test 
 Le prove browser salvano schermate desktop/telefono in `artifacts/`, esclusa da Git. Le immagini `pillole-1440.png` e `pillole-390.png` mostrano il registro; `fermentazioni-parallele-1440.png` e `fermentazioni-parallele-390.png` mostrano card e dettaglio di cicli indipendenti.
 
 Le immagini `impostazioni-timeout-{1440,390}.png` mostrano impostazioni globali e conferme dei dispositivi.
+
+Le immagini `riscaldamento-{1440,390}.png` mostrano la regolazione del riscaldamento. I relativi test coprono soglie e uguaglianze, isteresi, avvii concorrenti, rinnovi, scadenze, guasti, fine definitiva, prenotazione fino alla conferma OFF e recupero; usano soltanto API pubbliche, browser, MongoDB e simulatori HTTP. Le prove operative Docker arrestano realmente il server durante il riscaldamento e verificano lo spegnimento autonomo e il recupero di un termine con OFF pendente.
 
 Le prove del grafico usano API HTTP e browser per verificare tutte le quantità, precisione, flag di qualità, valori mancanti, timestamp uguali, invii fuori ordine e aggiornamenti di fermentazioni diverse. La legenda conserva la scelta durante il live; il tooltip riporta un campione coerente. `grafico-combinato-{1440,390}.png` mostra le sette serie e `linea-campioni-distanti-{1440,390}.png` isola il tracciato tra due letture distanti tre giorni. Il test controlla il bitmap realmente disegnato nella zona fra i campioni: soli marcatori non soddisfano la verifica. Non ispeziona gli oggetti interni di Chart.js.
 
