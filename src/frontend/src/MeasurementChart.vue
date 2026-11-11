@@ -19,7 +19,86 @@ import {
 import type { Measurement, MeasurementScale } from './measurements'
 
 Chart.register(LineController, LineElement, LinearScale, PointElement, Tooltip)
-const props = defineProps<{ readings: Reading[] }>()
+const props = defineProps<{ readings: Reading[]; range?: [number, number] }>()
+const emit = defineEmits<{ range: [start: number, end: number] }>()
+const gestureMode = ref<'zoom' | 'pan'>('zoom')
+const selection = ref<[number, number] | null>(null)
+const pointers = new Map<number, number>()
+let origin: { x: number; range: [number, number]; distance: number } | null =
+  null
+function position(event: PointerEvent) {
+  return event.clientX - canvas.value!.getBoundingClientRect().left
+}
+function pointTime(x: number, bounds: [number, number]) {
+  const scale = chart?.scales.x
+  if (!scale) return bounds[0]
+  return (
+    bounds[0] +
+    Math.max(0, Math.min(1, (x - scale.left) / scale.width)) *
+      (bounds[1] - bounds[0])
+  )
+}
+function pointerDown(event: PointerEvent) {
+  if (!props.range) return
+  event.preventDefault()
+  canvas.value?.setPointerCapture(event.pointerId)
+  pointers.set(event.pointerId, position(event))
+  const xs = [...pointers.values()]
+  origin = {
+    x: xs.reduce((sum, x) => sum + x, 0) / xs.length,
+    range: [...props.range],
+    distance: xs.length > 1 ? Math.abs(xs[1]! - xs[0]!) : 0,
+  }
+}
+function pointerMove(event: PointerEvent) {
+  if (!origin || !pointers.has(event.pointerId)) return
+  pointers.set(event.pointerId, position(event))
+  if (pointers.size === 1) selection.value = [origin.x, position(event)]
+}
+function pointerUp(event: PointerEvent) {
+  if (!origin || !pointers.has(event.pointerId)) return
+  const xs = [...pointers.values()]
+  const base = origin
+  if (pointers.size > 1 && base.distance > 0) {
+    const factor = base.distance / Math.max(1, Math.abs(xs[1]! - xs[0]!))
+    const center = pointTime(base.x, base.range)
+    const width = (base.range[1] - base.range[0]) * factor
+    emit('range', center - width / 2, center + width / 2)
+  } else if (Math.abs(position(event) - base.x) > 4) {
+    if (gestureMode.value === 'pan' || event.pointerType === 'touch') {
+      const delta =
+        ((position(event) - base.x) / (chart?.scales.x?.width ?? 1)) *
+        (base.range[1] - base.range[0])
+      emit('range', base.range[0] - delta, base.range[1] - delta)
+    } else {
+      const a = pointTime(base.x, base.range),
+        b = pointTime(position(event), base.range)
+      emit('range', Math.min(a, b), Math.max(a, b))
+    }
+  }
+  pointers.clear()
+  origin = null
+  selection.value = null
+}
+function cancelGesture() {
+  pointers.clear()
+  origin = null
+  selection.value = null
+}
+function wheel(event: WheelEvent) {
+  if (!props.range || !chart?.scales.x) return
+  event.preventDefault()
+  const center = pointTime(
+    event.clientX - canvas.value!.getBoundingClientRect().left,
+    props.range,
+  )
+  const factor = event.deltaY < 0 ? 0.75 : 1.333333333
+  emit(
+    'range',
+    center + (props.range[0] - center) * factor,
+    center + (props.range[1] - center) * factor,
+  )
+}
 const canvas = ref<HTMLCanvasElement | null>(null)
 const descriptionId = useId()
 const visibility = ref(measurements.map(() => true))
@@ -63,8 +142,9 @@ function scaleVisible(scale: MeasurementScale): boolean {
   )
 }
 function scales(): NonNullable<ChartOptions<'line'>['scales']> {
-  const first = props.readings[0]!.timestamp * 1000
-  const last = props.readings.at(-1)!.timestamp * 1000
+  const first = (props.range?.[0] ?? props.readings[0]?.timestamp ?? 0) * 1000
+  const last =
+    (props.range?.[1] ?? props.readings.at(-1)?.timestamp ?? 1) * 1000
   const gridScale = compact.value
     ? graduatedScale.value
     : measurementScales.find((scale) => scaleVisible(scale.id))?.id
@@ -194,6 +274,7 @@ onMounted(() => {
   observer.observe(canvas.value.parentElement!)
 })
 watch(() => props.readings, update)
+watch(() => props.range, update)
 watch(graduatedScale, update)
 onUnmounted(() => {
   observer?.disconnect()
@@ -203,6 +284,23 @@ onUnmounted(() => {
 
 <template>
   <section class="measurement-chart" aria-label="Grafico delle misure">
+    <div v-if="range" class="history-navigation" aria-label="Gesti del grafico">
+      <button
+        class="text-button"
+        :aria-pressed="gestureMode === 'zoom'"
+        @click="gestureMode = 'zoom'"
+      >
+        Seleziona per zoom
+      </button>
+      <button
+        class="text-button"
+        :aria-pressed="gestureMode === 'pan'"
+        @click="gestureMode = 'pan'"
+      >
+        Trascina per spostare
+      </button>
+      <span>Rotella: zoom · Due dita: pinch · Un dito: sposta</span>
+    </div>
     <fieldset class="chart-legend" aria-label="Serie del grafico">
       <legend>Misure nel grafico</legend>
       <label
@@ -260,11 +358,25 @@ onUnmounted(() => {
     <div class="chart-box">
       <canvas
         ref="canvas"
+        style="touch-action: none"
         role="img"
         :aria-label="`Grafico a linee: ${readings.length} ${readings.length === 1 ? 'lettura' : 'letture'}`"
         :aria-describedby="descriptionId"
+        @pointerdown="pointerDown"
+        @pointermove="pointerMove"
+        @pointerup="pointerUp"
+        @pointercancel="cancelGesture"
+        @wheel="wheel"
         >Valori esatti disponibili nella tabella delle letture.</canvas
       >
+      <div
+        v-if="selection && gestureMode === 'zoom'"
+        class="chart-selection"
+        :style="{
+          left: Math.min(...selection) + 'px',
+          width: Math.abs(selection[1] - selection[0]) + 'px',
+        }"
+      />
     </div>
     <div
       v-if="tooltip && tooltip.lines.length"
@@ -286,3 +398,16 @@ onUnmounted(() => {
     </div>
   </section>
 </template>
+<style scoped>
+.chart-box {
+  position: relative;
+}
+.chart-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #19534233;
+  border: 1px solid #195342;
+  pointer-events: none;
+}
+</style>

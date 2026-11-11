@@ -384,10 +384,19 @@ def get_readings(
     request: Request,
     limit: int = Query(default=200, ge=1, le=200),
     before: str | None = Query(default=None, max_length=100),
+    from_timestamp: float | None = Query(default=None, ge=0, allow_inf_nan=False),
+    to_timestamp: float | None = Query(default=None, ge=0, allow_inf_nan=False),
 ) -> dict[str, object]:
     db = database(request)
     document = require_fermentation(db, identifier)
     query = reading_filter(document)
+    if from_timestamp is not None and to_timestamp is not None and from_timestamp > to_timestamp:
+        raise HTTPException(422, "Intervallo temporale non valido.")
+    bounds = query["timestamp"]
+    if from_timestamp is not None:
+        bounds["$gte"] = max(bounds["$gte"], from_timestamp)
+    if to_timestamp is not None:
+        bounds["$lte"] = to_timestamp
     if before is not None:
         try:
             timestamp_text, cursor_identifier = before.split(":")
@@ -395,6 +404,12 @@ def get_readings(
             if not math.isfinite(timestamp) or timestamp < 0:
                 raise ValueError
             cursor_id = ObjectId(cursor_identifier)
+            if (
+                timestamp < bounds["$gte"]
+                or ("$lte" in bounds and timestamp > bounds["$lte"])
+                or ("$lt" in bounds and timestamp >= bounds["$lt"])
+            ):
+                raise ValueError
         except (ValueError, InvalidId):
             raise HTTPException(422, "Cursore dello storico non valido.") from None
         query["$or"] = [
