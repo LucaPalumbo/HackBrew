@@ -4,6 +4,7 @@ import MeasurementChart from './MeasurementChart.vue'
 import TimeNavigator from './TimeNavigator.vue'
 import FermentationControls from './FermentationControls.vue'
 import ThermalRegulationStatus from './ThermalRegulationStatus.vue'
+import ThermalSettings from './ThermalSettings.vue'
 import { controlModeNames, type Fermentation } from './fermentations'
 import type { Reading } from './readings'
 import { useLatestRequest } from './useLatestRequest'
@@ -176,6 +177,11 @@ function ended(updated: Fermentation) {
   emit('changed')
   void load()
 }
+function settingsChanged() {
+  invalidate()
+  emit('changed')
+  void load()
+}
 watch(
   () =>
     [
@@ -245,6 +251,14 @@ watch(
     <ThermalRegulationStatus
       v-if="fermentation?.status === 'concluded'"
       :fermentation="fermentation"
+    />
+    <ThermalSettings
+      v-if="
+        !live && fermentation && fermentation.control_mode !== 'monitor_only'
+      "
+      :key="fermentation.id"
+      :fermentation="fermentation"
+      @changed="settingsChanged"
     />
     <p
       v-if="notice"

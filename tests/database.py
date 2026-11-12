@@ -65,6 +65,8 @@ def arrange_heating_v16(identifier: str, heater_identifier: str) -> None:
                         "thermal_reserved",
                         "regulation.devices",
                         "regulation.reserved",
+                        "thermal_settings_revision",
+                        "thermal_settings_history",
                     ]
                 },
             ],

@@ -13,11 +13,19 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from hackbrew.models import FermentationStart
+from hackbrew.models import FermentationStart, ThermalSettingsUpdate
 from hackbrew.pills import require_pill
 from hackbrew.storage import database
 
 router = APIRouter(prefix="/api/fermentations")
+
+
+def settings_entry(values: dict[str, Any], revision: int, changed_at: float) -> dict[str, Any]:
+    return {
+        **{key: values[key] for key in ("temperature_min", "temperature_max", "hysteresis")},
+        "revision": revision,
+        "changed_at": changed_at,
+    }
 
 
 def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
@@ -44,6 +52,19 @@ def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
                     },
                 },
                 "$inc": {"control_revision": 1},
+            },
+        )
+    # Previous versions never edited these values, so their initial settings are known.
+    for cycle in db.fermentations.find(
+        {"devices": {"$exists": True}, "thermal_settings_revision": {"$exists": False}}
+    ):
+        db.fermentations.update_one(
+            {"_id": cycle["_id"], "thermal_settings_revision": {"$exists": False}},
+            {
+                "$set": {
+                    "thermal_settings_revision": 0,
+                    "thermal_settings_history": [settings_entry(cycle, 0, cycle["started_at"])],
+                }
             },
         )
     db.fermentations.create_index(
@@ -96,6 +117,7 @@ def public_fermentation(document: dict[str, Any]) -> dict[str, Any]:
                     "devices",
                     "reserved_device_ids",
                     "thermal_reserved",
+                    "thermal_settings_revision",
                 )
             }
             | {
@@ -245,6 +267,8 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
                 },
             }
         )
+        document["thermal_settings_revision"] = 0
+        document["thermal_settings_history"] = [settings_entry(document, 0, started_at)]
     try:
         if devices:
             document["regulation"]["devices"] = {
@@ -285,6 +309,59 @@ def get_fermentation(identifier: str, request: Request) -> dict[str, object]:
         "latest_reading": summary["latest_reading"],
         "reading_count": summary["reading_count"],
     }
+
+
+@router.get("/{identifier}/thermal-settings/history")
+def get_thermal_settings_history(identifier: str, request: Request) -> dict[str, object]:
+    document = require_fermentation(database(request), identifier)
+    return {
+        "fermentation": public_fermentation(document),
+        "history": [
+            {**entry, "changed_at": datetime.fromtimestamp(entry["changed_at"], UTC)}
+            for entry in document.get("thermal_settings_history", [])
+        ],
+    }
+
+
+@router.patch("/{identifier}/thermal-settings")
+def change_thermal_settings(
+    identifier: str, payload: ThermalSettingsUpdate, request: Request
+) -> dict[str, object]:
+    db = database(request)
+    current = require_fermentation(db, identifier)
+    if current.get("control_mode", "monitor_only") == "monitor_only":
+        raise HTTPException(422, "Solo monitoraggio non utilizza impostazioni termiche.")
+    values = payload.model_dump(exclude={"expected_revision"})
+    document = db.fermentations.find_one_and_update(
+        {
+            "_id": identifier,
+            "status": "active",
+            "thermal_settings_revision": payload.expected_revision,
+        },
+        {
+            "$set": {
+                **values,
+                "regulation.status": "pending",
+                "regulation.reason": (
+                    "Impostazioni salvate; in attesa del ricalcolo e della conferma."
+                ),
+            },
+            "$inc": {"thermal_settings_revision": 1, "control_revision": 1},
+            "$push": {
+                "thermal_settings_history": settings_entry(
+                    values, payload.expected_revision + 1, monitoring_time()
+                )
+            },
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    if document is None:
+        raise HTTPException(
+            409,
+            "La fermentazione è conclusa o le impostazioni sono state modificate. "
+            "Ricarica i valori salvati prima di riprovare.",
+        )
+    return {"fermentation": public_fermentation(document)}
 
 
 @router.post("/{identifier}/end")

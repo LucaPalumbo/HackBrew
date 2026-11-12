@@ -44,6 +44,7 @@ export type Fermentation = {
   temperature_min?: number
   temperature_max?: number
   hysteresis?: number
+  thermal_settings_revision?: number
   regulation?: {
     status:
       | 'waiting'
@@ -61,6 +62,14 @@ export type Fermentation = {
     error: string | null
     confirmed_at: string | null
   }
+}
+
+export type ThermalSettingsEntry = {
+  revision: number
+  changed_at: string
+  temperature_min: number
+  temperature_max: number
+  hysteresis: number
 }
 
 export const regulationNames = {

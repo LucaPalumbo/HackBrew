@@ -49,7 +49,26 @@ Liste, dettaglio e live espongono `devices` con identità, nome, capacità e ruo
 
 Gli stati sono `waiting`, `pending`, `heating`, `cooling`, `idle`, `suspended`, `stopping` e `stopped`. Una conferma di un'assegnazione rilasciata è storica, non descrive il dispositivo nella nuova fermentazione. Il live aggiorna anche gli OFF confermati dopo il termine.
 
-L'aggiornamento dal formato della #16 conserva in loco comandi, soglie, isteresi, assegnazioni e OFF pendenti, senza azzerare dati. Al riavvio viene letto lo stato reale: il comando ricordato non è una conferma. La modifica della fascia durante il ciclo appartiene al successivo ticket dedicato.
+L'aggiornamento dal formato della #16 conserva in loco comandi, soglie, isteresi, assegnazioni e OFF pendenti, senza azzerare dati. Al riavvio viene letto lo stato reale: il comando ricordato non è una conferma.
+
+## Modificare fascia e isteresi
+
+Il dettaglio di una fermentazione regolata attiva offre il form **Impostazioni termiche**. I tre valori vengono validati e salvati insieme; pillola, dispositivi, nome, intervallo del ciclo e ultima ricezione restano invariati. Il controllo rivaluta l'ultima temperatura utilizzabile, mantenendo timeout, isteresi e conferma OFF prima della funzione opposta. Salvare non certifica l'applicazione fisica: il dettaglio distingue impostazioni salvate, comando pendente, stato effettivo e comunicazione sospesa.
+
+`GET /api/fermentations/{id}` espone `thermal_settings_revision` per i cicli regolati. Per modificarli:
+
+```http
+PATCH /api/fermentations/{id}/thermal-settings
+Content-Type: application/json
+
+{"expected_revision":0,"temperature_min":18,"temperature_max":23,"hysteresis":0.75}
+```
+
+La risposta contiene `fermentation` con i valori salvati e la nuova revisione. Sono obbligatori tutti e tre i valori finiti e una revisione intera non negativa; valgono i limiti della creazione. Campi estranei, compresi assegnazioni e nome, restituiscono HTTP 422. Una revisione superata o un ciclo concluso restituisce HTTP 409; Solo monitoraggio HTTP 422; un identificatore sconosciuto HTTP 404. MongoDB indisponibile restituisce HTTP 503 senza confermare il salvataggio.
+
+Valori, incremento della revisione e aggiunta alla cronologia sono una singola modifica atomica al documento del ciclo, concorrente anche con il termine manuale. La revisione delle impostazioni è indipendente dagli aggiornamenti dello stato degli attuatori. Il controllo scarta gli snapshot superati e usa comandi ordinati; la UI conserva la bozza durante gli aggiornamenti live, segnala conflitti e ignora risposte di salvataggio superate da una revisione successiva o dalla conclusione.
+
+`GET /api/fermentations/{id}/thermal-settings/history` restituisce `fermentation` e `history` nello stesso snapshot. Ogni voce contiene `revision`, `changed_at` (data UTC), `temperature_min`, `temperature_max` e `hysteresis`, in ordine di revisione. La revisione 0 rappresenta la configurazione iniziale all'avvio. I cicli regolati delle versioni precedenti, che non consentivano modifiche, ricevono questa voce al primo avvio della nuova versione. Nessun dato viene cancellato; revisioni e cronologia persistono ai riavvii. Solo monitoraggio restituisce una cronologia vuota. Un ciclo concluso conserva la cronologia in sola lettura.
 
 ## Prove Docker
 

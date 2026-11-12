@@ -110,6 +110,17 @@ def verify_database_outage(
         ("GET", "/api/fermentations/active", None),
         ("GET", f"/api/fermentations/{expected['closed']['id']}", None),
         ("GET", f"/api/fermentations/{expected['closed']['id']}/readings", None),
+        ("GET", f"/api/fermentations/{expected['active']['id']}/thermal-settings/history", None),
+        (
+            "PATCH",
+            f"/api/fermentations/{expected['active']['id']}/thermal-settings",
+            {
+                "expected_revision": 0,
+                "temperature_min": 18,
+                "temperature_max": 23,
+                "hysteresis": 0.75,
+            },
+        ),
     ]
     for method, path, body in operations:
         response = api.request(method, path, json=body)

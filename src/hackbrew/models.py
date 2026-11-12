@@ -40,6 +40,27 @@ class PillRegistration(BaseModel):
     mac: BluetoothMac
 
 
+class ThermalSettings(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    temperature_min: FiniteFloat = Field(ge=-273.15)
+    temperature_max: FiniteFloat = Field(ge=-273.15)
+    hysteresis: FiniteFloat = Field(gt=0)
+
+    @model_validator(mode="after")
+    def valid_interval(self) -> Self:
+        if (
+            self.temperature_min >= self.temperature_max
+            or self.temperature_min + self.hysteresis > self.temperature_max
+        ):
+            raise ValueError("Minimo inferiore al massimo e spegnimento entro la fascia richiesti.")
+        return self
+
+
+class ThermalSettingsUpdate(ThermalSettings):
+    expected_revision: int = Field(ge=0)
+
+
 class FermentationStart(BaseModel):
     model_config = ConfigDict(strict=True, str_strip_whitespace=True, extra="forbid")
 
@@ -86,13 +107,11 @@ class FermentationStart(BaseModel):
             assert self.temperature_min is not None
             assert self.temperature_max is not None
             assert self.hysteresis is not None
-            if (
-                self.temperature_min >= self.temperature_max
-                or self.temperature_min + self.hysteresis > self.temperature_max
-            ):
-                raise ValueError(
-                    "Minimo inferiore al massimo e spegnimento entro la fascia richiesti."
-                )
+            ThermalSettings(
+                temperature_min=self.temperature_min,
+                temperature_max=self.temperature_max,
+                hysteresis=self.hysteresis,
+            )
         return self
 
 

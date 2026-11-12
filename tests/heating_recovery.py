@@ -41,6 +41,8 @@ def verify_heating_recovery(
         cycle = start_heating(api, simulator)
         temperature(api, 17)
         wait_regulation(api, cycle, "heating")
+        settings_path = f"/api/fermentations/{cycle['id']}/thermal-settings"
+        initial_history = api.get(settings_path + "/history").json()["history"]
         temperature(api, 18.25)
         before = simulator.get("/api/v1/state").json()["accepted_command"]
         arrange_heating_v16(cycle["id"], cycle["heater_id"])
@@ -53,19 +55,38 @@ def verify_heating_recovery(
             ),
         )
         assert continued["accepted_command"]["ownership_id"] == cycle["id"]
-        assert wait_regulation(api, cycle, "heating")["hysteresis"] == 0.5
+        preserved_settings = wait_regulation(api, cycle, "heating")
+        assert preserved_settings["hysteresis"] == 0.5
+        assert preserved_settings["temperature_max"] == 22
+        assert preserved_settings["thermal_settings_revision"] == 0
+        assert api.get(settings_path + "/history").json()["history"] == initial_history
+        api.patch(
+            settings_path,
+            json={
+                "expected_revision": 0,
+                "temperature_min": 18,
+                "temperature_max": 23,
+                "hysteresis": 0.75,
+            },
+        ).raise_for_status()
+        wait_regulation(api, cycle, "heating")
+        saved_history = api.get(settings_path + "/history").json()["history"]
 
         temperature(api, 17)
-        api.patch("/api/settings", json={"communication_timeout_seconds": 2}).raise_for_status()
+        # Leave time for the external Docker coordinator to kill the server before
+        # pill freshness expires; this check must observe the actuator's watchdog.
+        api.patch("/api/settings", json={"communication_timeout_seconds": 8}).raise_for_status()
         wait_device(
             simulator,
             lambda s: (
                 s["actual_mode"] == "heating"
-                and s["applied_timeout_seconds"] == 2
-                and s["accepted_command"]["timeout_seconds"] == 2
+                and s["applied_timeout_seconds"] == 8
+                and s["accepted_command"]["timeout_seconds"] == 8
             ),
         )
+        temperature(api, 17)
         phase("stop-heating-server", "heating-server-down", page)
+        assert simulator.get("/api/v1/state").json()["actual_mode"] == "heating"
         expired = wait_device(
             simulator,
             lambda s: s["actual_mode"] == "off" and s["application_status"] == "timed_out",
@@ -74,7 +95,11 @@ def verify_heating_recovery(
         with suppress(httpx.HTTPError):
             assert api.get("/api/health", timeout=2).status_code >= 500
         phase("restart-heating-server", "heating-server-up", page)
-        wait_regulation(api, cycle, "suspended")
+        after_restart = wait_regulation(api, cycle, "suspended")
+        assert after_restart["hysteresis"] == 0.75
+        assert after_restart["temperature_max"] == 23
+        assert after_restart["thermal_settings_revision"] == 1
+        assert api.get(settings_path + "/history").json()["history"] == saved_history
         wait_device(
             simulator,
             lambda s: s["actual_mode"] == "off" and s["accepted_command"]["mode"] == "off",
@@ -96,6 +121,7 @@ def verify_heating_recovery(
         assert preserved["ended_at"] == ended["ended_at"]
         assert preserved["heater_reserved"] is True
         assert preserved["regulation"]["desired_mode"] == "off"
+        assert api.get(settings_path + "/history").json()["history"] == saved_history
         simulator.patch(
             "/__simulation",
             json={
