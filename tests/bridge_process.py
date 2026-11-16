@@ -11,7 +11,9 @@ from typing import Any
 
 
 class BridgeProcess:
-    def __init__(self, directory: Path, base_url: str, *, interval: float = 0.15) -> None:
+    def __init__(
+        self, directory: Path, base_url: str, *, interval: float = 0.15, timeout_seconds: float = 1
+    ) -> None:
         config = directory / "bridge.json"
         config.write_text(
             json.dumps(
@@ -19,9 +21,9 @@ class BridgeProcess:
                     "registry": {
                         "url": base_url + "/api/bridge/pills",
                         "poll_interval_seconds": interval,
-                        "timeout_seconds": 1,
+                        "timeout_seconds": timeout_seconds,
                     },
-                    "http": {"url": base_url + "/telemetry", "timeout_seconds": 1},
+                    "http": {"url": base_url + "/telemetry", "timeout_seconds": timeout_seconds},
                 }
             )
         )

@@ -7,6 +7,11 @@ case "$recovery_project" in
     *) printf '%s\n' 'Recovery checks require an isolated hackbrew-tests-* project.' >&2; exit 2 ;;
 esac
 recovery_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+recovery_suite=${2:-all}
+case "$recovery_suite" in
+    all|assembled) ;;
+    *) printf '%s\n' 'Recovery suite must be all or assembled.'; exit 2 ;;
+esac
 recovery_container="$recovery_project-recovery"
 recovery_directory=/tmp/hackbrew-recovery
 
@@ -14,9 +19,10 @@ compose() {
     docker compose --project-name "$recovery_project" -f "$recovery_root/compose.test.yaml" "$@"
 }
 
-compose up --detach --wait thermal-heating thermal-cooling
+compose up --detach --wait thermal-heating thermal-cooling thermal-both
 compose run --rm --no-deps -T --name "$recovery_container" \
-    -e "HACKBREW_RECOVERY_DIR=$recovery_directory" tests python -m tests.check_recovery &
+    -e "HACKBREW_RECOVERY_DIR=$recovery_directory" \
+    -e "HACKBREW_RECOVERY_SCENARIO=$recovery_suite" tests python -m tests.check_recovery &
 recovery_driver_pid=$!
 cleanup() {
     recovery_exit_code=$?
@@ -48,38 +54,63 @@ signal_phase() {
     docker exec "$recovery_container" touch "$recovery_directory/$1"
 }
 
-wait_phase stop-mongo
+if [ "$recovery_suite" = all ]; then
+    wait_phase stop-mongo
+    compose stop mongo
+    signal_phase mongo-down
+    wait_phase start-mongo
+    compose up --detach --wait mongo
+    signal_phase mongo-up
+    wait_phase stop-app
+    compose stop app
+    signal_phase app-down
+    wait_phase recreate-services
+    compose up --force-recreate --detach --wait app mongo
+    signal_phase services-up
+    wait_phase restart-heating-hysteresis
+    compose kill --signal SIGKILL app
+    compose up --detach --wait app
+    signal_phase heating-hysteresis-up
+    wait_phase stop-heating-server
+    compose kill --signal SIGKILL app
+    signal_phase heating-server-down
+    wait_phase restart-heating-server
+    compose up --detach --wait app
+    signal_phase heating-server-up
+    wait_phase restart-pending-off
+    compose kill --signal SIGKILL app
+    compose up --detach --wait app
+    signal_phase pending-off-restarted
+    wait_phase restart-pair-regulation
+    compose kill --signal SIGKILL app
+    compose up --detach --wait app
+    signal_phase pair-regulation-up
+    wait_phase restart-pair-shutdown
+    compose kill --signal SIGKILL app
+    compose up --detach --wait app
+    signal_phase pair-shutdown-up
+fi
+
+wait_phase assembled-restart-hysteresis
+compose kill --signal SIGKILL app
+compose up --detach --wait app
+signal_phase assembled-hysteresis-up
+wait_phase assembled-stop-reconciliation
+compose kill --signal SIGKILL app
+signal_phase assembled-reconciliation-down
+wait_phase assembled-start-reconciliation
+compose up --detach --wait app
+signal_phase assembled-reconciliation-up
+wait_phase assembled-stop-mongo
 compose stop mongo
-signal_phase mongo-down
-wait_phase start-mongo
+signal_phase assembled-mongo-down
+wait_phase assembled-start-mongo
 compose up --detach --wait mongo
-signal_phase mongo-up
-wait_phase stop-app
-compose stop app
-signal_phase app-down
-wait_phase recreate-services
+signal_phase assembled-mongo-up
+wait_phase assembled-stop-server
+compose kill --signal SIGKILL app
+signal_phase assembled-server-down
+wait_phase assembled-recreate-services
 compose up --force-recreate --detach --wait app mongo
-signal_phase services-up
-wait_phase restart-heating-hysteresis
-compose kill --signal SIGKILL app
-compose up --detach --wait app
-signal_phase heating-hysteresis-up
-wait_phase stop-heating-server
-compose kill --signal SIGKILL app
-signal_phase heating-server-down
-wait_phase restart-heating-server
-compose up --detach --wait app
-signal_phase heating-server-up
-wait_phase restart-pending-off
-compose kill --signal SIGKILL app
-compose up --detach --wait app
-signal_phase pending-off-restarted
-wait_phase restart-pair-regulation
-compose kill --signal SIGKILL app
-compose up --detach --wait app
-signal_phase pair-regulation-up
-wait_phase restart-pair-shutdown
-compose kill --signal SIGKILL app
-compose up --detach --wait app
-signal_phase pair-shutdown-up
+signal_phase assembled-services-up
 wait "$recovery_driver_pid"

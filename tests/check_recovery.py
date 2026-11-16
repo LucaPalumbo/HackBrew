@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 from playwright.sync_api import Page, expect, sync_playwright
 
+from tests.assembled_recovery import verify_assembled_recovery
 from tests.database import reset_test_database
 from tests.heating_recovery import verify_heating_recovery
 from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
@@ -235,10 +236,17 @@ def verify_application_recreation(
 def main() -> None:
     if os.environ["MONGODB_DATABASE"] != "hackbrew_test":
         raise RuntimeError("Recovery checks require the isolated hackbrew_test database")
+    suite = os.environ.get("HACKBREW_RECOVERY_SCENARIO", "all")
+    if suite not in {"all", "assembled"}:
+        raise RuntimeError("Unknown recovery scenario")
     with httpx.Client(base_url=os.environ["HACKBREW_BASE_URL"], timeout=10) as api:
-        expected = seed(api)
+        expected = seed(api) if suite == "all" else None
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
+            if expected is None:
+                verify_assembled_recovery(api, browser, phase)
+                browser.close()
+                return
             current = browser.new_page(locale="it-IT", viewport={"width": 390, "height": 844})
             archive = browser.new_page(locale="it-IT", viewport={"width": 1440, "height": 1000})
             current.goto(str(api.base_url))
@@ -254,6 +262,9 @@ def main() -> None:
             verify_application_recreation(api, current, archive, expected)
             verify_heating_recovery(api, current, phase)
             verify_thermal_recovery(api, current, phase)
+            current.close()
+            archive.close()
+            verify_assembled_recovery(api, browser, phase)
             browser.close()
     print(
         "Recovery: MongoDB, app e container ricreati; stato, storico e live verificati.", flush=True

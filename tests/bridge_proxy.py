@@ -37,13 +37,17 @@ class BridgeProxy:
                     self.forward("POST", body)
 
             def forward(self, method: str, body: bytes | None = None) -> None:
-                with httpx.Client(base_url=upstream, timeout=5) as client:
-                    response = client.request(
-                        method,
-                        self.path,
-                        content=body,
-                        headers={"Content-Type": "application/json"},
-                    )
+                try:
+                    with httpx.Client(base_url=upstream, timeout=5) as client:
+                        response = client.request(
+                            method,
+                            self.path,
+                            content=body,
+                            headers={"Content-Type": "application/json"},
+                        )
+                except httpx.HTTPError:
+                    self.reply(503, b"{}")
+                    return
                 self.reply(response.status_code, response.content)
 
             def reply(self, status: int, body: bytes) -> None:

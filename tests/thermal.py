@@ -22,6 +22,50 @@ def thermal_simulator(capability: str = "both") -> Iterator[httpx.Client]:
             client.post("/__simulation/reset").raise_for_status()
 
 
+@contextmanager
+def observed_actuator(simulator: httpx.Client) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    """Record external control requests while forwarding to the real HTTP simulator."""
+    commands: list[dict[str, Any]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.forward("GET")
+
+        def do_PUT(self) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if self.path == "/api/v1/control":
+                commands.append(json.loads(body))
+            self.forward("PUT", body)
+
+        def forward(self, method: str, body: bytes | None = None) -> None:
+            try:
+                response = simulator.request(
+                    method, self.path, content=body, headers={"Content-Type": "application/json"}
+                )
+                data, status = response.content, response.status_code
+            except httpx.HTTPError:
+                data, status = b"{}", 503
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    address = socket.gethostbyname(socket.gethostname())
+    try:
+        yield f"http://{address}:{server.server_port}", commands
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def claim_command(simulator: httpx.Client, **changes: Any) -> dict[str, Any]:
     state = simulator.get("/api/v1/state").json()
     return {
