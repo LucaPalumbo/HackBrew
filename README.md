@@ -4,6 +4,20 @@ Dashboard web per registrare pillole Bluetooth e monitorare più fermentazioni d
 
 Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9), [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10) e [registrazione e verifica dei dispositivi termici](https://github.com/LucaPalumbo/HackBrew/issues/14). Il [grafico unico a linee](https://github.com/LucaPalumbo/HackBrew/issues/12) mostra tutte le misure; il riscaldamento automatico con timeout e termine definitivo è disponibile con la [#16](https://github.com/LucaPalumbo/HackBrew/issues/16). Raffreddamento e combinazioni sono disponibili con la #17; la navigazione temporale con zoom è disponibile con la #13.
 
+## Confrontare i tre prototipi UI/UX
+
+Sul branch `prototype/ui-ux-redesign` puoi avviare le tre proposte con:
+
+```sh
+./scripts/hackbrew prototype
+```
+
+Apri [A — Console operativa](http://localhost:15173/?variant=A), [B — Diario di birrificazione](http://localhost:15173/?variant=B) o [C — Monitor compatto](http://localhost:15173/?variant=C). La barra flottante e i tasti freccia permettono di cambiare proposta mantenendo pagina e stato locale. La sezione in fondo alla pagina permette di provare Home con fermentazioni attive, solo concluse o primo avvio.
+
+Tutti i contenuti sono dimostrativi: creazione, conclusione, registro e impostazioni modificano soltanto lo stato in memoria e si azzerano ricaricando. Il grafico permette di provare finestra unica, trascinamento, zoom, serie opzionali, dati grezzi e CSV. L'istanza Docker usa il progetto separato `hackbrew-ui-prototype`, database dedicato e porte locali **15173** (interfaccia) e **18090** (backend). Non richiede il gateway o credenziali GitHub.
+
+`./scripts/hackbrew prototype check` esegue lint, TypeScript e build nel container; `prototype capture` salva anteprime desktop e mobile in `artifacts/prototypes/`; `prototype down` ferma solo questa istanza. I prototipi sono attivi esclusivamente in sviluppo, con `?variant=`: la build di produzione conserva l'interfaccia esistente. Il [brief di confronto](docs/design/hackbrew-ui-ux-redesign.md) raccoglie le decisioni concordate. La scelta definitiva e l'implementazione seguono il confronto.
+
 ## Requisiti e avvio
 
 Servono Docker Engine e Docker Compose. Node, Python, MongoDB e i browser di test vengono gestiti nei container. I comandi seguenti usano una shell POSIX.

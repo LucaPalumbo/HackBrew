@@ -1,0 +1,15 @@
+services:
+  frontend:
+    environment:
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: frontend
+  prototype-browser:
+    profiles: [tools]
+    build:
+      context: .
+      target: browser-deps
+    volumes:
+      - .:/workspace:ro,z
+      - ./artifacts/prototypes:/artifacts:z
+    environment:
+      PROTOTYPE_URL: http://frontend:5173
+    shm_size: 1gb

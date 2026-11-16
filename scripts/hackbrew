@@ -10,6 +10,33 @@ if [ "$#" -gt 0 ]; then
 fi
 
 case "$action" in
+    prototype)
+        export COMPOSE_PROJECT_NAME=hackbrew-ui-prototype
+        export MONGODB_DATABASE=hackbrew_prototype
+        export HACKBREW_BIND_ADDRESS=127.0.0.1
+        export HACKBREW_PORT=18090
+        export HACKBREW_FRONTEND_PORT=15173
+        case "${1:-up}" in
+            up)
+                docker compose -f compose.yaml -f compose.dev.yaml -f compose.prototype.yaml --profile dev up --build --detach --wait app frontend
+                printf '%s\n' 'Prototype: http://localhost:15173/?variant=A'
+                ;;
+            format)
+                docker compose --project-name hackbrew-ui-prototype -f compose.yaml -f compose.dev.yaml exec -T frontend npm run format
+                ;;
+            check)
+                docker compose --project-name hackbrew-ui-prototype -f compose.yaml -f compose.dev.yaml exec -T frontend npm run lint
+                docker compose --project-name hackbrew-ui-prototype -f compose.yaml -f compose.dev.yaml exec -T frontend npm run build
+                ;;
+            capture)
+                docker compose -f compose.yaml -f compose.dev.yaml -f compose.prototype.yaml run --rm --build --no-deps -T prototype-browser python scripts/prototype-preview.py
+                ;;
+            down)
+                docker compose -f compose.yaml -f compose.dev.yaml -f compose.prototype.yaml --profile dev --profile tools down
+                ;;
+            *) printf '%s\n' 'Usage: ./scripts/hackbrew prototype [up|format|check|capture|down]'; exit 2 ;;
+        esac
+        ;;
     up)
         docker compose -f compose.yaml up --build --detach --wait "$@"
         ;;
@@ -84,7 +111,7 @@ case "$action" in
         "$0" test
         ;;
     help)
-        printf '%s\n' 'Usage: ./scripts/hackbrew {up|down|build|dev|simulator|lint|format|format-check|typecheck|test [pytest arguments]|test-recovery [assembled]|check}'
+        printf '%s\n' 'Usage: ./scripts/hackbrew {up|down|build|dev|prototype [up|format|check|capture|down]|simulator|lint|format|format-check|typecheck|test [pytest arguments]|test-recovery [assembled]|check}'
         ;;
     *)
         printf '%s\n' "Unknown command: $action" >&2
