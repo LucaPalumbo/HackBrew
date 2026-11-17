@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import FermentationCard from './FermentationCard.vue'
+import { pillCommunication, type CommunicationClock } from './communication'
 import type { FermentationSummary } from './fermentations'
 import type { PillSnapshot } from './readings'
 import { useLatestRequest } from './useLatestRequest'
@@ -11,6 +12,8 @@ const props = defineProps<{
   active: FermentationSummary[]
   pills: PillSnapshot[]
   revision: number
+  clock: CommunicationClock | null
+  connected: boolean
 }>()
 defineEmits<{ select: [id: string]; retry: [] }>()
 const recent = ref<FermentationSummary[]>([])
@@ -114,8 +117,11 @@ watch(
           <FermentationCard
             :fermentation="cycle"
             :communication="
-              pills.find((pill) => pill.id === cycle.pill_id)
-                ?.communication_status
+              pillCommunication(
+                pills.find((pill) => pill.id === cycle.pill_id),
+                clock,
+                connected,
+              )
             "
             @select="$emit('select', $event)"
           />

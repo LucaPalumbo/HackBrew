@@ -9,6 +9,7 @@ import SettingsPage from './SettingsPage.vue'
 import HomePage from './HomePage.vue'
 import NavigationIcon from './NavigationIcon.vue'
 import ReadingSummary from './ReadingSummary.vue'
+import { pillCommunication, type CommunicationClock } from './communication'
 import type { Fermentation, FermentationSummary } from './fermentations'
 import type { PillSnapshot, Reading } from './readings'
 
@@ -98,7 +99,6 @@ const diagnosticReading = computed(
 )
 const fermentation = ref<Fermentation | null>(null)
 const activeFermentations = ref<FermentationSummary[]>([])
-const fermentationReading = ref<Reading | null>(null)
 const selectedId = ref(
   new URLSearchParams(window.location.search).get('fermentation') || null,
 )
@@ -130,23 +130,30 @@ let communicationTimer: ReturnType<typeof setInterval> | undefined
 const communicationTimeout = ref<number | null>(null)
 const serverReference = ref<{ time: number; observedAt: number } | null>(null)
 const clock = ref(performance.now())
+const communicationClock = computed<CommunicationClock | null>(() => {
+  if (!serverReference.value || communicationTimeout.value === null) return null
+  return {
+    now:
+      serverReference.value.time +
+      (clock.value - serverReference.value.observedAt) / 1000,
+    timeout: communicationTimeout.value,
+  }
+})
 const dataStatus = computed(() => {
   if (!hasSnapshot.value) return 'Stato dei dati non disponibile'
   if (!reading.value) return 'Nessuna lettura'
-  if (!serverReference.value || communicationTimeout.value === null)
-    return 'Verifica comunicazione…'
-  const serverNow =
-    serverReference.value.time +
-    (clock.value - serverReference.value.observedAt) / 1000
-  const identifier = diagnosticPillId.value
-  const received = pills.value.find(
-    (pill) => pill.id === identifier,
-  )?.last_received_at
-  if (!received) return 'Nessuna comunicazione ricevuta'
-  return serverNow - new Date(received).getTime() / 1000 >=
-    communicationTimeout.value
-    ? 'Timeout di comunicazione superato'
-    : 'Lettura disponibile'
+  const status = pillCommunication(
+    pills.value.find((pill) => pill.id === diagnosticPillId.value),
+    communicationClock.value,
+    connection.value === 'live',
+  )
+  return {
+    unknown: 'Verifica comunicazione…',
+    never_received: 'Nessuna comunicazione ricevuta',
+    receiving: 'Lettura disponibile',
+    timed_out: 'Timeout di comunicazione superato',
+    unconfirmed_timeout: 'Timeout di comunicazione superato',
+  }[status]
 })
 
 async function loadLatest() {
@@ -177,7 +184,6 @@ function applySnapshot(snapshot: Snapshot) {
     diagnosticPillId.value = snapshot.pill_id ?? ''
   fermentation.value = snapshot.fermentation
   activeFermentations.value = snapshot.active_fermentations
-  fermentationReading.value = snapshot.fermentation_reading
   communicationTimeout.value = snapshot.communication_timeout_seconds
   clock.value = performance.now()
   serverReference.value = {
@@ -286,6 +292,8 @@ onUnmounted(() => {
         <HomePage
           v-if="page === 'home'"
           :ready="hasSnapshot"
+          :clock="communicationClock"
+          :connected="connection === 'live'"
           :loading="isLoading"
           :error="error"
           :active="activeFermentations"

@@ -6,7 +6,7 @@ Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e
 
 ## Pagine e navigazione
 
-La **Home** mostra tutte le fermentazioni attive con le rispettive ultime letture e lo stato di comunicazione. Se non ci sono attive propone le tre concluse più recenti, con periodo di avvio e termine e senza batteria. Al primo avvio mostra i collegamenti per registrare i dispositivi e iniziare un ciclo.
+La **Home** mostra tutte le fermentazioni attive con le rispettive ultime letture e lo stato di comunicazione. Se non ci sono attive propone le tre concluse più recenti, con periodo di avvio e termine e senza batteria. Al primo avvio mostra i collegamenti per registrare i dispositivi e iniziare un ciclo. Se il collegamento si interrompe, le card conservano i valori ricevuti e segnalano quando l’ultima comunicazione confermata supera il timeout; alla riconnessione si aggiornano dallo stato del server.
 
 La navigazione laterale su computer e inferiore sul telefono porta a **Home**, **Archivio**, **Dispositivi** e **Impostazioni**. **Nuova fermentazione** apre il modulo dedicato; dopo l'avvio si apre il dettaglio del ciclo creato. Le card aprono una pagina distinta di dettaglio, con grafico, letture e comandi già disponibili. L'Archivio mantiene l'elenco completo con ricerca e paginazione.
 

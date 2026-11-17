@@ -5,10 +5,10 @@ import {
   regulationNames,
   type FermentationSummary,
 } from './fermentations'
-import type { PillSnapshot } from './readings'
+import type { CommunicationStatus } from './communication'
 defineProps<{
   fermentation: FermentationSummary
-  communication?: PillSnapshot['communication_status']
+  communication?: CommunicationStatus
 }>()
 defineEmits<{ select: [id: string] }>()
 const dates = new Intl.DateTimeFormat('it-IT', {
@@ -28,7 +28,7 @@ const temperatures = new Intl.NumberFormat('it-IT', {
       'home-card-warning':
         fermentation.status === 'active' &&
         (fermentation.regulation?.status === 'suspended' ||
-          communication === 'timed_out'),
+          ['timed_out', 'unconfirmed_timeout'].includes(communication ?? '')),
     }"
     :aria-label="`Apri ${fermentation.name}, ${dates.format(new Date(fermentation.started_at))}`"
     @click="$emit('select', fermentation.id)"
@@ -81,14 +81,23 @@ const temperatures = new Intl.NumberFormat('it-IT', {
     <p
       v-if="fermentation.status === 'active'"
       class="card-communication"
-      :class="{ 'card-communication-warning': communication === 'timed_out' }"
+      :class="{
+        'card-communication-warning': [
+          'timed_out',
+          'unconfirmed_timeout',
+        ].includes(communication ?? ''),
+      }"
     >
       {{
-        communication === 'timed_out'
-          ? 'Timeout di comunicazione superato'
-          : fermentation.latest_reading
-            ? 'Ultima lettura disponibile'
-            : 'In attesa della prima lettura'
+        communication === 'unconfirmed_timeout'
+          ? 'Ultima comunicazione confermata oltre il timeout'
+          : communication === 'unknown'
+            ? 'Comunicazione non disponibile'
+            : communication === 'timed_out'
+              ? 'Timeout di comunicazione superato'
+              : fermentation.latest_reading
+                ? 'Ultima lettura disponibile'
+                : 'In attesa della prima lettura'
       }}
     </p>
     <div class="home-card-footer">

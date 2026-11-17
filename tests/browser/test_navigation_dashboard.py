@@ -149,3 +149,37 @@ def test_failed_recent_history_is_not_presented_as_first_start(
     page.get_by_role("button", name="Riprova fermentazioni recenti", exact=True).click()
     expect(page.get_by_role("button", name="Apri Birra conservata", exact=False)).to_be_visible()
     expect(page.get_by_role("alert")).to_have_count(0)
+
+
+def test_home_expires_the_last_confirmed_contact_offline_and_recovers(
+    page: Page, api: httpx.Client
+) -> None:
+    api.patch("/api/settings", json={"communication_timeout_seconds": 30}).raise_for_status()
+    pill = api.post("/api/pills", json={"name": "Pillola", "mac": "AA:BB:CC:DD:EE:FF"}).json()[
+        "pill"
+    ]
+    api.post(
+        "/api/fermentations", json={"name": "IPA offline", "pill_id": pill["id"]}
+    ).raise_for_status()
+    api.post(
+        "/telemetry",
+        json=gateway_lettura(timestamp=datetime.now(UTC).timestamp(), specific_gravity=1050),
+    ).raise_for_status()
+    page.clock.install()
+    page.goto(str(api.base_url))
+    card = page.get_by_role("button", name="Apri IPA offline", exact=False)
+    expect(card).to_contain_text("Ultima lettura disponibile")
+    page.context.set_offline(True)
+    expect(page.get_by_label("Collegamento live")).to_contain_text("Riconnessione automatica")
+    page.clock.fast_forward(31000)
+    expect(card).to_contain_text("Ultima comunicazione confermata oltre il timeout")
+    expect(card).to_contain_text("1.050")
+    api.post(
+        "/telemetry",
+        json=gateway_lettura(timestamp=datetime.now(UTC).timestamp(), specific_gravity=1040),
+    ).raise_for_status()
+    expect(card).to_contain_text("1.050")
+    page.context.set_offline(False)
+    expect(card).to_contain_text("1.040", timeout=10000)
+    expect(card).to_contain_text("Ultima lettura disponibile")
+    expect(card.get_by_text("Ultima comunicazione confermata oltre il timeout")).to_have_count(0)
