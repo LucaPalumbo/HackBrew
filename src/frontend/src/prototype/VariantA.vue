@@ -6,8 +6,7 @@ import ProtoIcon from './ProtoIcon.vue'
   <div class="p-console-shell">
     <aside class="p-console-sidebar">
       <a href="?variant=A" class="p-brand" @click.prevent="navigate('home')"
-        ><span class="p-brand-symbol">h<span>°</span></span
-        >HackBrew</a
+        ><span class="p-brand-symbol" aria-hidden="true">hb</span>HackBrew</a
       >
       <div class="p-sidebar-caption">IL TUO BIRRIFICIO</div>
       <nav aria-label="Navigazione principale">

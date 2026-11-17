@@ -199,11 +199,8 @@
   height: 36px;
   border-radius: 8px;
   font-family: Georgia, serif;
-  font-size: 30px;
-}
-.ui-prototype .p-brand-symbol span {
-  font-size: 17px;
-  align-self: flex-start;
+  font-size: 22px;
+  font-style: italic;
 }
 .ui-prototype .p-demo {
   display: inline-flex;
@@ -2066,7 +2063,7 @@
   .p-variant-a .p-brand-symbol {
     width: 28px;
     height: 30px;
-    font-size: 26px;
+    font-size: 20px;
   }
   .p-variant-a .p-console-sidebar > .p-primary {
     margin: 0;
