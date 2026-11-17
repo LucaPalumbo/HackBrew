@@ -110,3 +110,7 @@ Il 17 novembre 2026 l'utente ha indicato: «Mi piace molto il prototipo A». **A
 Nel successivo riscontro l'utente ha indicato che il layout va bene per il momento e ha preferito il precedente monogramma **hb** al simbolo **h°**. Il prototipo A ripristina quindi **hb** su desktop e telefono.
 
 La preferenza definisce la direzione visiva; eventuali ritocchi restano da raccogliere una domanda per volta. Non equivale ancora all'approvazione di una specifica di implementazione. Le tre proposte restano conservate sul branch `prototype/ui-ux-redesign`; nessuna variante è stata promossa su `main`.
+
+## Specifica pubblicata
+
+La sintesi funzionale del redesign è pubblicata nella [specifica #20](https://github.com/LucaPalumbo/HackBrew/issues/20), con etichetta `ready-for-agent`. L'issue include il riferimento immutabile al prototipo A con logo hb, le decisioni di implementazione e il perimetro di test HTTP/browser già confermato. La suddivisione in ticket e l'implementazione definitiva sono fasi successive.
