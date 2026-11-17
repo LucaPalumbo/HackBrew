@@ -1,6 +1,6 @@
 # Redesign UI e UX di HackBrew
 
-Sessione `grill-with-docs` conclusa con conferma esplicita della comprensione condivisa. Le indicazioni sotto sono state raccolte una domanda per volta. È autorizzata la costruzione di tre prototipi confrontabili; la scelta visiva finale deve ancora avvenire.
+Sessione `grill-with-docs` conclusa con conferma esplicita della comprensione condivisa. Le indicazioni sotto sono state raccolte una domanda per volta. Sono stati costruiti tre prototipi confrontabili; l'utente ha espresso una preferenza per **A — Console operativa**, adottato come base per i successivi affinamenti.
 
 ## Modalità della sessione
 
@@ -103,4 +103,8 @@ La demo mostra esempi di regolazione normale, solo monitoraggio e assenza di com
 - Su viewport mobile verificati finestra dei dati grezzi a schermo intero, uso delle frecce sul selettore senza cambiare variante e separazione fra navigazione e barra di confronto.
 - Nessuna nuova suite di test: il codice è esplorativo e usa stato locale. Le prove non sostituiscono i test HTTP/browser della futura implementazione e non certificano gesti su hardware mobile reale.
 
-**Esito di design:** scelta ancora aperta. È possibile combinare elementi di proposte diverse; nessuna variante è stata promossa su `main`.
+## Preferenza emersa dal confronto
+
+Il 17 novembre 2026 l'utente ha indicato: «Mi piace molto il prototipo A». **A — Console operativa** è quindi il riferimento per proseguire il redesign: navigazione laterale su desktop, card a griglia e dettaglio con grafico affiancato dalle misure. Su telefono mantiene la disposizione adattata e la navigazione inferiore mostrate nell'anteprima.
+
+La preferenza definisce la direzione visiva; eventuali ritocchi restano da raccogliere una domanda per volta. Non equivale ancora all'approvazione di una specifica di implementazione. Le tre proposte restano conservate sul branch `prototype/ui-ux-redesign`; nessuna variante è stata promossa su `main`.
