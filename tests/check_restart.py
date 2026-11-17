@@ -237,7 +237,7 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
         browser = playwright.chromium.launch()
         page = browser.new_page(locale="it-IT", viewport={"width": 390, "height": 844})
         page.set_default_timeout(5000)
-        page.goto(str(api.base_url))
+        page.goto(str(api.base_url) + "?page=archive")
         page.get_by_role("button", name="Apri Persistenza conclusa").click()
         expect(
             page.get_by_role("heading", name="Storico: Persistenza conclusa", exact=True)

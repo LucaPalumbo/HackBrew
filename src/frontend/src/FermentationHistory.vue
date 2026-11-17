@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import MeasurementChart from './MeasurementChart.vue'
+import ReadingSummary from './ReadingSummary.vue'
 import TimeNavigator from './TimeNavigator.vue'
 import FermentationControls from './FermentationControls.vue'
 import ThermalRegulationStatus from './ThermalRegulationStatus.vue'
@@ -22,6 +23,7 @@ const detailSection = ref<HTMLElement | null>(null)
 const fermentation = ref<Fermentation | null>(null)
 const readings = ref<Reading[]>([])
 const chartReadings = ref<Reading[]>([])
+const latestReading = ref<Reading | null>(null)
 const chartAvailable = ref(false)
 const window = ref<[number, number] | null>(null)
 const domain = ref<[number, number] | null>(null)
@@ -148,6 +150,7 @@ async function load(
     },
     ({ detailPayload, historyPayload, samples, selected, bounds }) => {
       fermentation.value = detailPayload.fermentation
+      latestReading.value = detailPayload.latest_reading
       readings.value = historyPayload.readings
       chartReadings.value = samples
       chartAvailable.value = detailPayload.latest_reading !== null
@@ -198,6 +201,7 @@ watch(
       invalidate()
       loadedId = identifier
       fermentation.value = null
+      latestReading.value = null
       readings.value = []
       chartReadings.value = []
       chartAvailable.value = false
@@ -241,6 +245,14 @@ watch(
           : `${fermentation?.status === 'active' ? 'Dettaglio' : 'Storico'}: ${fermentation?.name ?? (error ? 'non disponibile' : 'caricamento…')}`
       }}
     </h2>
+    <ReadingSummary v-if="latestReading" :reading="latestReading" />
+    <section
+      v-else-if="fermentation?.status === 'active' && !loading && !error"
+      class="empty"
+    >
+      <h2>In attesa della prima lettura della fermentazione</h2>
+      <p>Il grafico apparirà alla prima lettura.</p>
+    </section>
     <FermentationControls
       v-if="!live && fermentation?.status === 'active'"
       :fermentation="fermentation"
@@ -313,7 +325,14 @@ watch(
       </button>
     </p>
     <p v-if="loading" role="status">Caricamento storico…</p>
-    <p v-if="fermentation && !readings.length && !loading && !error">
+    <p
+      v-if="
+        fermentation?.status === 'concluded' &&
+        !readings.length &&
+        !loading &&
+        !error
+      "
+    >
       {{
         live
           ? 'Il grafico apparirà alla prima lettura.'

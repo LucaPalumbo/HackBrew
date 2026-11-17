@@ -4,6 +4,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import open_active_fermentation
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -13,7 +14,7 @@ def test_active_charts_and_table_update_with_real_letture(
 ) -> None:
     api.post("/api/fermentations", json=fermentation_payload(api, "IPA live")).raise_for_status()
     page.set_viewport_size({"width": width, "height": height})
-    page.goto(str(api.base_url))
+    open_active_fermentation(page, api)
     expect(page.get_by_text("Il grafico apparirà alla prima lettura.", exact=True)).to_be_visible()
     assert (
         api.post(
@@ -83,7 +84,7 @@ def test_selected_concluded_history_stays_separate_from_new_live_data_and_surviv
         == 200
     )
     page.set_viewport_size({"width": width, "height": height})
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=archive")
     page.get_by_role("button", name="Apri Prima IPA").click()
     expect(page.get_by_role("heading", name="Storico: Prima IPA", exact=True)).to_be_visible()
     table = page.get_by_role("table", name="Letture della fermentazione")
@@ -105,13 +106,16 @@ def test_selected_concluded_history_stays_separate_from_new_live_data_and_surviv
     expect(page.get_by_role("heading", name="Storico: Prima IPA", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="1.060", exact=True)).to_be_visible()
 
+    page.get_by_role("navigation").get_by_role("link", name="Archivio", exact=True).click()
     page.get_by_role("button", name="Apri Seconda stout").click()
     expect(page.get_by_role("heading", name="Storico: Seconda stout", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="60", exact=True)).to_be_visible()
     page.go_back()
+    expect(page.get_by_role("heading", name="Archivio", exact=True)).to_be_visible()
+    page.go_back()
     expect(page.get_by_role("heading", name="Storico: Prima IPA", exact=True)).to_be_visible()
-    page.get_by_role("button", name="Monitoraggio attuale", exact=True).click()
+    open_active_fermentation(page, api)
     expect(
         page.get_by_role("region", name="Densità").get_by_text("1.020", exact=True)
     ).to_be_visible()

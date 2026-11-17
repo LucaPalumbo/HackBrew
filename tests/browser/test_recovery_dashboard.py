@@ -23,7 +23,7 @@ def test_selected_history_recovers_automatically_after_a_failed_load_and_reconne
     assert (
         api.post("/api/fermentations", json=fermentation_payload(api, "Attiva")).status_code == 201
     )
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=archive")
     page.route("**/api/fermentations/*/readings?*", lambda route: route.abort("connectionfailed"))
     page.get_by_role("button", name="Apri Storico da recuperare").click()
     expect(page.get_by_role("alert")).to_contain_text("Non è stato possibile recuperare lo storico")
@@ -68,13 +68,15 @@ def test_failed_initial_snapshot_does_not_invent_an_empty_fermentazione_state(
     ).to_be_visible()
     expect(page.get_by_role("button", name="Avvia fermentazione", exact=True)).to_have_count(0)
     expect(page.get_by_text("Nessuna fermentazione attiva", exact=True)).to_have_count(0)
-    expect(page.get_by_label("Stato dei dati")).to_have_text("Stato dei dati non disponibile")
+    expect(
+        page.get_by_text("Stato delle fermentazioni non disponibile.", exact=True)
+    ).to_be_visible()
 
     page.unroute("**/api/readings/latest")
     page.unroute("**/api/readings/events")
     expect(page.get_by_role("heading", name="IPA già avviata", exact=True)).to_be_visible(
         timeout=10000
     )
-    expect(
-        page.get_by_role("region", name="Densità").get_by_text("1.040", exact=True)
-    ).to_be_visible()
+    expect(page.get_by_role("button", name="Apri IPA già avviata", exact=False)).to_contain_text(
+        "1.040"
+    )

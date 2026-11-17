@@ -4,6 +4,25 @@ Dashboard web per registrare pillole Bluetooth e monitorare più fermentazioni d
 
 Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e MongoDB. Il frontend viene compilato in Docker e servito da FastAPI. Il gateway Bluetooth è esterno al progetto. La [nuova specifica](https://github.com/LucaPalumbo/HackBrew/issues/8) estende l'[MVP](https://github.com/LucaPalumbo/HackBrew/issues/1): sono disponibili [registro e letture identificate](https://github.com/LucaPalumbo/HackBrew/issues/9), [fermentazioni parallele con card e dettaglio](https://github.com/LucaPalumbo/HackBrew/issues/10) e [registrazione e verifica dei dispositivi termici](https://github.com/LucaPalumbo/HackBrew/issues/14). Il [grafico unico a linee](https://github.com/LucaPalumbo/HackBrew/issues/12) mostra tutte le misure; il riscaldamento automatico con timeout e termine definitivo è disponibile con la [#16](https://github.com/LucaPalumbo/HackBrew/issues/16). Raffreddamento e combinazioni sono disponibili con la #17; la navigazione temporale con zoom è disponibile con la #13.
 
+## Pagine e navigazione
+
+La **Home** mostra tutte le fermentazioni attive con le rispettive ultime letture e lo stato di comunicazione. Se non ci sono attive propone le tre concluse più recenti, con periodo di avvio e termine e senza batteria. Al primo avvio mostra i collegamenti per registrare i dispositivi e iniziare un ciclo.
+
+La navigazione laterale su computer e inferiore sul telefono porta a **Home**, **Archivio**, **Dispositivi** e **Impostazioni**. **Nuova fermentazione** apre il modulo dedicato; dopo l'avvio si apre il dettaglio del ciclo creato. Le card aprono una pagina distinta di dettaglio, con grafico, letture e comandi già disponibili. L'Archivio mantiene l'elenco completo con ricerca e paginazione.
+
+Destinazioni raggiungibili anche direttamente:
+
+| Pagina | Indirizzo locale |
+| --- | --- |
+| Home | `http://localhost:8080/` |
+| Archivio | `http://localhost:8080/?page=archive` |
+| Nuova fermentazione | `http://localhost:8080/?page=new` |
+| Dispositivi | `http://localhost:8080/?page=devices` |
+| Impostazioni | `http://localhost:8080/?page=settings` |
+| Diagnostica delle pillole | `http://localhost:8080/?page=diagnostics` |
+
+La diagnostica è accessibile anche da Dispositivi e permette di scegliere una pillola e aggiornare l'ultima lettura senza avviare un ciclo. I collegamenti esistenti `?fermentation=<id>` continuano ad aprire il dettaglio corretto; ricaricamento e Indietro/Avanti del browser sono supportati. Il passaggio alla nuova navigazione conserva il volume e non richiede un reset dei dati.
+
 ## Requisiti e avvio
 
 Servono Docker Engine e Docker Compose. Node, Python, MongoDB e i browser di test vengono gestiti nei container. I comandi seguenti usano una shell POSIX.
@@ -276,6 +295,7 @@ Per un solo file o un singolo caso:
 ```sh
 ./scripts/hackbrew test tests/integration/test_readings.py
 ./scripts/hackbrew test tests/integration/test_readings.py -k older
+./scripts/hackbrew test tests/browser/test_navigation_dashboard.py
 ./scripts/hackbrew test tests/browser/test_dashboard.py
 ./scripts/hackbrew test tests/integration/test_live_readings.py
 ./scripts/hackbrew test tests/browser/test_live_dashboard.py

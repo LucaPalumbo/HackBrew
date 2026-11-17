@@ -87,7 +87,7 @@ def test_settings_update_live_communication_without_inventing_a_new_receipt(
 
     api.post("/telemetry", json=gateway_lettura()).raise_for_status()
     before = api.get("/api/readings/latest").json()
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=diagnostics")
     expect(page.get_by_label("Stato dei dati")).to_have_text("Lettura disponibile")
     api.patch("/api/settings", json={"communication_timeout_seconds": 0.01}).raise_for_status()
     expect(page.get_by_label("Stato dei dati")).to_have_text("Timeout di comunicazione superato")
