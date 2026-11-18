@@ -284,6 +284,29 @@ onUnmounted(() => {
 
 <template>
   <section class="measurement-chart" aria-label="Grafico delle misure">
+    <div class="chart-box">
+      <canvas
+        ref="canvas"
+        style="touch-action: none"
+        role="img"
+        :aria-label="`Grafico a linee: ${readings.length} ${readings.length === 1 ? 'lettura' : 'letture'}`"
+        :aria-describedby="descriptionId"
+        @pointerdown="pointerDown"
+        @pointermove="pointerMove"
+        @pointerup="pointerUp"
+        @pointercancel="cancelGesture"
+        @wheel="wheel"
+        >Valori esatti disponibili nella tabella delle letture.</canvas
+      >
+      <div
+        v-if="selection && gestureMode === 'zoom'"
+        class="chart-selection"
+        :style="{
+          left: Math.min(...selection) + 'px',
+          width: Math.abs(selection[1] - selection[0]) + 'px',
+        }"
+      />
+    </div>
     <div v-if="range" class="history-navigation" aria-label="Gesti del grafico">
       <button
         class="text-button"
@@ -355,29 +378,6 @@ onUnmounted(() => {
     <p v-if="visibleCount === 0" role="status">
       Nessuna serie selezionata. Seleziona una misura dalla legenda.
     </p>
-    <div class="chart-box">
-      <canvas
-        ref="canvas"
-        style="touch-action: none"
-        role="img"
-        :aria-label="`Grafico a linee: ${readings.length} ${readings.length === 1 ? 'lettura' : 'letture'}`"
-        :aria-describedby="descriptionId"
-        @pointerdown="pointerDown"
-        @pointermove="pointerMove"
-        @pointerup="pointerUp"
-        @pointercancel="cancelGesture"
-        @wheel="wheel"
-        >Valori esatti disponibili nella tabella delle letture.</canvas
-      >
-      <div
-        v-if="selection && gestureMode === 'zoom'"
-        class="chart-selection"
-        :style="{
-          left: Math.min(...selection) + 'px',
-          width: Math.abs(selection[1] - selection[0]) + 'px',
-        }"
-      />
-    </div>
     <div
       v-if="tooltip && tooltip.lines.length"
       class="chart-tooltip"

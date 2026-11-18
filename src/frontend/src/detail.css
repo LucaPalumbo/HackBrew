@@ -1,0 +1,227 @@
+.detail-heading h1 {
+  margin: 12px 0;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 500;
+  letter-spacing: -1px;
+  overflow-wrap: anywhere;
+}
+.detail-badge {
+  margin-left: 12px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: #e9f3f3;
+  color: #215a61;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+.detail-period {
+  margin-bottom: 28px;
+  overflow-wrap: anywhere;
+}
+.detail-tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid #dce3e7;
+  margin-bottom: 24px;
+}
+.detail-tabs button {
+  padding: 12px 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #74828b;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.detail-tabs button[aria-selected='true'] {
+  border-bottom-color: #215a61;
+  color: #215a61;
+}
+.detail-trend {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 210px;
+  align-items: start;
+  gap: 24px;
+}
+.detail-chart-column,
+.detail-last-reading,
+.detail-assignments {
+  padding: 22px;
+  border: 1px solid #dce3e7;
+  border-radius: 9px;
+  background: white;
+  min-width: 0;
+}
+.detail-chart-heading h2 {
+  font-size: 21px;
+  font-weight: 500;
+}
+.detail-chart-column .measurement-chart {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: white;
+}
+.detail-chart-column .chart-box {
+  height: clamp(450px, 55vh, 600px);
+}
+.detail-chart-column .time-navigator {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 16px 0;
+}
+.detail-chart-column .time-navigator > .history-navigation {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+}
+.detail-chart-column .time-navigator > label {
+  margin: 4px 0;
+  min-width: 0;
+  font-size: 12px;
+}
+.detail-chart-column .time-navigator > p {
+  grid-column: 1 / -1;
+  margin: 4px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.detail-last-reading .reading-summary {
+  margin: 0;
+}
+.detail-last-reading .reading-heading {
+  display: block;
+  margin-bottom: 20px;
+}
+.detail-last-reading .reading-heading h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.detail-last-reading .reading-heading span {
+  font-size: 11px;
+}
+.detail-last-reading .metrics {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+}
+.detail-last-reading .metric {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: white;
+  color: #20313b;
+}
+.detail-last-reading .metric-heading,
+.detail-last-reading .metric-unit {
+  color: #74828b;
+}
+.detail-last-reading .metric-heading h3 {
+  font-size: 12px;
+}
+.detail-last-reading .metric-symbol,
+.detail-last-reading .metric-caption {
+  display: none;
+}
+.detail-last-reading .metric-value {
+  font-size: 32px;
+  margin: 14px 0 8px;
+}
+.detail-last-reading .acquisition {
+  display: block;
+  margin-top: 24px;
+  padding-top: 16px;
+  padding-inline: 0;
+  border-top: 1px solid #dce3e7;
+  border-radius: 0;
+  background: transparent;
+}
+.detail-last-reading .acquisition > p {
+  margin-top: 16px;
+}
+.detail-cycle-summary {
+  margin-top: 24px;
+  border-top: 1px solid #dce3e7;
+  padding-top: 16px;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.detail-readings {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.detail-management > section {
+  margin: 24px 0;
+}
+.detail-management > .thermal-status,
+.detail-management > .fermentation-panel {
+  padding: 22px;
+  border: 1px solid #dce3e7;
+  border-radius: 9px;
+  background: white;
+}
+.detail-assignments dl {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+}
+.detail-assignments dt {
+  font-size: 12px;
+  color: #74828b;
+}
+.detail-assignments dd {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+.end-confirmation {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 28px;
+  border: 1px solid #dce3e7;
+  border-radius: 12px;
+  color: #20313b;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.end-confirmation::backdrop {
+  background: rgb(15 31 38 / 55%);
+}
+.confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+@media (max-width: 1100px) {
+  .detail-trend {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .detail-last-reading {
+    grid-row: 2;
+  }
+  .detail-last-reading .metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+@media (max-width: 600px) {
+  .detail-chart-column,
+  .detail-last-reading,
+  .detail-assignments {
+    padding: 16px 12px;
+  }
+  .detail-last-reading .metric-value {
+    font-size: 24px;
+  }
+  .detail-last-reading .metric-unit {
+    font-size: 11px;
+  }
+}
+.fermentation-detail:focus {
+  outline: none;
+}

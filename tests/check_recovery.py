@@ -10,6 +10,7 @@ import httpx
 from playwright.sync_api import Page, expect, sync_playwright
 
 from tests.assembled_recovery import verify_assembled_recovery
+from tests.browser.navigation import finish_fermentation
 from tests.database import reset_test_database
 from tests.heating_recovery import verify_heating_recovery
 from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
@@ -143,10 +144,14 @@ def verify_database_outage(
     assert (
         current.get_by_label("Acquisizione della lettura").get_attribute("datetime") == acquired_at
     )
-    current.get_by_role("button", name="Termina fermentazione").click()
+    finish_fermentation(current)
     expect(current.get_by_role("alert").filter(has_text="Archivio delle letture")).to_be_visible()
     expect(current.get_by_role("status", name="Esito operazione")).to_have_count(0)
+    current.get_by_role("dialog", name="Concludi la fermentazione").get_by_role(
+        "button", name="Annulla", exact=True
+    ).click()
     expect(current.get_by_role("heading", name="Recupero attiva", exact=True)).to_be_visible()
+    current.get_by_role("tab", name="Andamento", exact=True).click()
     archive.reload()
     expect(
         archive.get_by_role("alert").filter(has_text="Non è stato possibile recuperare lo storico")
@@ -222,7 +227,7 @@ def verify_application_recreation(
         archive.get_by_role("heading", name="Storico: Storico recupero", exact=True)
     ).to_be_visible()
     assert_persisted_state(api, expected)
-    current.get_by_role("button", name="Termina fermentazione").click()
+    finish_fermentation(current)
     expect(current.get_by_role("status", name="Esito operazione")).to_contain_text("conclusa")
     assert api.get("/api/fermentations/active").json()["fermentation"] is None
     assert (

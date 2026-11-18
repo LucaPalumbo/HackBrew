@@ -57,7 +57,7 @@ Apri **http://localhost:8090**. Il progetto dimostrativo ha rete e volume propri
 
 1. In **Dispositivi**, registra le pillole con i MAC Bluetooth reali. Per il replay senza hardware usa `AA:BB:CC:DD:EE:FF` e `11:22:33:44:55:66`.
 2. Per una dimostrazione con attuatore simulato avvia `HACKBREW_SIMULATOR_CAPABILITY=both ./scripts/hackbrew simulator`. Registra un dispositivo con entrambe le funzioni e indirizzo **`http://thermal-simulator:8000`**, poi usa **Verifica collegamento**. Il simulatore è opzionale e appartiene a questa dimostrazione; non è un servizio applicativo obbligatorio.
-3. Nel **Monitoraggio**, avvia un ciclo scegliendo pillola e nome. **Solo monitoraggio** non chiede soglie o attuatori. Per l'altro ciclo scegli **Dispositivo combinato**, il simulatore e una fascia come 20–23 °C con isteresi 1 °C. Lo stesso dispositivo non è riutilizzabile finché rimane riservato.
+3. In **Nuova fermentazione**, avvia un ciclo scegliendo pillola e nome. **Solo monitoraggio** non chiede soglie o attuatori. Per l'altro ciclo scegli **Dispositivo combinato**, il simulatore e una fascia come 20–23 °C con isteresi 1 °C. Lo stesso dispositivo non è riutilizzabile finché rimane riservato.
 4. Configura un'unica istanza del [bridge](../integrations/rapt-gateway.md) con gli URL raggiungibili del server:
 
    ```yaml
@@ -72,9 +72,9 @@ Apri **http://localhost:8090**. Il progetto dimostrativo ha rete e volume propri
 
    Su un computer distinto sostituisci `localhost` con l'indirizzo LAN del server e configura coerentemente `HACKBREW_BIND_ADDRESS`. Segui il README del bridge per il suo avvio Docker con Bluetooth oppure per `--replay -`. Il replay documentato invia i byte di due pillole attraverso lo stesso decoder usato con Bluetooth. Nei log, `registry_synced ... pills=2` conferma le identità; `reading_forwarded source=...` conferma le nuove consegne. Il bridge rimane esterno a HackBrew.
 5. Controlla le due card: le letture devono appartenere alle rispettive pillole, con tempi di acquisizione reali. Apri un dettaglio, scegli un intervallo, nascondi una serie, prova zoom/pan e poi **Torna al live**. Nel replay le due fixture originali mostrano circa 19,69 °C/SG 1,0213 e 23,94 °C/SG 1,0109; `valid=false` riguarda solo la velocità della densità.
-6. Nel dettaglio regolato modifica insieme minimo, massimo e isteresi. Controlla i valori salvati, la revisione e la cronologia iniziale/modificata. Lo stato di regolazione distingue richiesta e conferma fisica. In **Impostazioni**, modifica il timeout comune e controlla le conferme dei dispositivi; per una demo manuale scegli una durata sufficiente a completare le operazioni.
+6. Nella scheda **Gestione** del dettaglio regolato modifica insieme minimo, massimo e isteresi. Controlla i valori salvati, la revisione e la cronologia iniziale/modificata. Lo stato di regolazione distingue richiesta e conferma fisica. In **Impostazioni**, modifica il timeout comune e controlla le conferme dei dispositivi; per una demo manuale scegli una durata sufficiente a completare le operazioni.
 7. Interrompi e ripristina la rete del browser lasciando aperto il dettaglio. Le vecchie letture devono conservare i propri istanti e l'intervallo scelto. Dopo nuove acquisizioni il live riprende senza cambiare fermentazione. Per riprodurre anche i guasti ai servizi usa `test-recovery assembled`, che opera su un ambiente separato invece di fermare questo progetto manuale.
-8. Premi **Termina fermentazione**. Il ciclo rimane concluso dopo reload o riavvio; lo spegnimento non confermato rimane visibile e trattiene la prenotazione. Non viene riaperto dall'arrivo di nuove letture.
+8. Nella scheda **Gestione** premi **Termina fermentazione** e poi **Conferma termine**. Il ciclo rimane concluso dopo reload o riavvio; lo spegnimento non confermato rimane visibile e trattiene la prenotazione. Non viene riaperto dall'arrivo di nuove letture.
 
 Per arrestare la dimostrazione, nella stessa shell usa `./scripts/hackbrew down`; il volume viene conservato. Le variabili esportate valgono per questa shell: una nuova shell senza queste variabili torna al progetto e alle porte abituali.
 

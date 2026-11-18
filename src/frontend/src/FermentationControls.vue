@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import ThermalRegulationStatus from './ThermalRegulationStatus.vue'
 import type { Fermentation } from './fermentations'
 import type { PillSnapshot } from './readings'
@@ -90,6 +90,20 @@ watch(
   },
 )
 const saving = ref(false)
+const confirmation = ref<HTMLDialogElement | null>(null)
+const endButton = ref<HTMLButtonElement | null>(null)
+const confirming = ref(false)
+function requestEnd() {
+  confirming.value = true
+  error.value = ''
+  void nextTick(() => confirmation.value?.showModal())
+}
+function cancelEnd() {
+  if (saving.value) return
+  confirmation.value?.close()
+  confirming.value = false
+  endButton.value?.focus()
+}
 const error = ref('')
 const notice = ref('')
 const dateFormat = new Intl.DateTimeFormat('it-IT', {
@@ -98,6 +112,7 @@ const dateFormat = new Intl.DateTimeFormat('it-IT', {
 })
 
 async function submit(action: 'start' | 'end') {
+  if (saving.value) return
   error.value = ''
   notice.value = ''
   if (action === 'start' && !name.value.trim()) {
@@ -169,6 +184,8 @@ async function submit(action: 'start' | 'end') {
     }
     notice.value = `Fermentazione “${payload.fermentation.name}” ${action === 'start' ? 'avviata' : 'conclusa'}.`
     if (action === 'start') name.value = ''
+    confirmation.value?.close()
+    confirming.value = false
     emit('changed', payload.fermentation)
   } catch {
     error.value =
@@ -196,14 +213,53 @@ async function submit(action: 'start' | 'end') {
         </p>
       </div>
       <button
+        ref="endButton"
         class="refresh"
         type="button"
         :disabled="saving || loading"
-        @click="submit('end')"
+        @click="requestEnd"
       >
         {{ saving ? 'Operazione in corso…' : 'Termina fermentazione' }}
       </button>
     </div>
+    <dialog
+      v-if="fermentation"
+      ref="confirmation"
+      class="end-confirmation"
+      aria-labelledby="end-confirmation-title"
+      @cancel.prevent="cancelEnd"
+    >
+      <h2 id="end-confirmation-title">Concludi la fermentazione</h2>
+      <p>Vuoi terminare definitivamente “{{ fermentation.name }}”?</p>
+      <p>
+        Il termine è definitivo. Le letture e la configurazione restano
+        consultabili.
+      </p>
+      <p v-if="fermentation.control_mode !== 'monitor_only'">
+        Verrà richiesto lo spegnimento di tutti i dispositivi associati. Ogni
+        dispositivo resta riservato fino alla conferma dello spegnimento.
+      </p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <div class="confirmation-actions">
+        <button
+          type="button"
+          class="text-button"
+          autofocus
+          :disabled="saving"
+          @click="cancelEnd"
+        >
+          Annulla
+        </button>
+        <button
+          type="button"
+          class="refresh"
+          :disabled="saving"
+          @click="submit('end')"
+        >
+          {{ saving ? 'Operazione in corso…' : 'Conferma termine' }}
+        </button>
+      </div>
+    </dialog>
     <ThermalRegulationStatus v-if="fermentation" :fermentation="fermentation" />
     <form
       v-if="!fermentation || allowStart"
@@ -385,7 +441,7 @@ async function submit(action: 'start' | 'end') {
         {{ saving ? 'Operazione in corso…' : 'Avvia fermentazione' }}
       </button>
     </form>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="error && !confirming" class="error" role="alert">{{ error }}</p>
     <p
       v-if="notice"
       class="operation-notice"

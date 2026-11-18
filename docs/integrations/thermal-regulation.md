@@ -1,6 +1,6 @@
 # Regolazione termica
 
-La pagina Monitoraggio offre Solo monitoraggio, Riscaldamento, Raffreddamento, Riscaldamento e raffreddamento separati e Dispositivo combinato. Una fermentazione usa una sola pillola; le assegnazioni restano fisse durante il ciclo.
+La pagina Nuova fermentazione offre Solo monitoraggio, Riscaldamento, Raffreddamento, Riscaldamento e raffreddamento separati e Dispositivo combinato. Una fermentazione usa una sola pillola; le assegnazioni restano fisse durante il ciclo.
 
 ## Creazione e capacità
 
@@ -53,7 +53,7 @@ L'aggiornamento dal formato della #16 conserva in loco comandi, soglie, isteresi
 
 ## Modificare fascia e isteresi
 
-Il dettaglio di una fermentazione regolata attiva offre il form **Impostazioni termiche**. I tre valori vengono validati e salvati insieme; pillola, dispositivi, nome, intervallo del ciclo e ultima ricezione restano invariati. Il controllo rivaluta l'ultima temperatura utilizzabile, mantenendo timeout, isteresi e conferma OFF prima della funzione opposta. Salvare non certifica l'applicazione fisica: il dettaglio distingue impostazioni salvate, comando pendente, stato effettivo e comunicazione sospesa.
+La scheda Gestione del dettaglio di una fermentazione regolata attiva offre il form **Impostazioni termiche**. I tre valori vengono validati e salvati insieme; pillola, dispositivi, nome, intervallo del ciclo e ultima ricezione restano invariati. Il controllo rivaluta l'ultima temperatura utilizzabile, mantenendo timeout, isteresi e conferma OFF prima della funzione opposta. Salvare non certifica l'applicazione fisica: il dettaglio distingue impostazioni salvate, comando pendente, stato effettivo e comunicazione sospesa.
 
 `GET /api/fermentations/{id}` espone `thermal_settings_revision` per i cicli regolati. Per modificarli:
 

@@ -10,7 +10,11 @@ import HomePage from './HomePage.vue'
 import NavigationIcon from './NavigationIcon.vue'
 import ReadingSummary from './ReadingSummary.vue'
 import { pillCommunication, type CommunicationClock } from './communication'
-import type { Fermentation, FermentationSummary } from './fermentations'
+import type {
+  Fermentation,
+  FermentationSummary,
+  FermentationTab,
+} from './fermentations'
 import type { PillSnapshot, Reading } from './readings'
 
 type Snapshot = {
@@ -48,6 +52,20 @@ function requestedPage(): Page {
   return Object.hasOwn(pageNames, candidate) ? (candidate as Page) : 'home'
 }
 const page = ref<Page>(requestedPage())
+function requestedTab(): FermentationTab {
+  return new URLSearchParams(window.location.search).get('tab') === 'management'
+    ? 'management'
+    : 'trend'
+}
+const detailTab = ref<FermentationTab>(requestedTab())
+function selectDetailTab(tab: FermentationTab) {
+  if (tab === detailTab.value) return
+  const url = new URL(window.location.href)
+  if (tab === 'management') url.searchParams.set('tab', tab)
+  else url.searchParams.delete('tab')
+  window.history.pushState(null, '', url)
+  restoreSelection()
+}
 const main = ref<HTMLElement>()
 const operationNotice = ref('')
 const activeNavigation = computed(() =>
@@ -107,6 +125,7 @@ function selectFermentation(identifier: string | null) {
 }
 function restoreSelection() {
   page.value = requestedPage()
+  detailTab.value = requestedTab()
   selectedId.value =
     new URLSearchParams(window.location.search).get('fermentation') || null
 }
@@ -312,8 +331,6 @@ onUnmounted(() => {
           </div>
           <FermentationArchive
             :recovery-revision="recoveryRevision"
-            :selected-id="null"
-            :active-id="fermentation?.id ?? null"
             :revision="historyRevision"
             @select="selectFermentation"
         /></template>
@@ -370,11 +387,13 @@ onUnmounted(() => {
             {{ operationNotice }}
           </p>
           <FermentationHistory
+            :tab="detailTab"
             :recovery-revision="recoveryRevision"
             :identifier="selectedId"
             :revision="historyRevision"
             :live="false"
             @changed="historyChanged"
+            @tab="selectDetailTab"
         /></template>
         <template v-else-if="page === 'diagnostics'"
           ><div class="page-heading">

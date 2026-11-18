@@ -5,6 +5,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import finish_fermentation, show_management
 from tests.heating import temperature
 from tests.thermal import thermal_simulator
 
@@ -36,6 +37,7 @@ def test_create_heat_and_end_with_truthful_pending_shutdown(
         expect(page.get_by_role("status", name="Esito operazione", exact=True)).to_contain_text(
             "avviata"
         )
+        show_management(page)
         temperature(api, 17)
         regulation = page.get_by_role("region", name="Regolazione IPA riscaldata", exact=True)
         expect(regulation).to_contain_text("Riscaldamento attivo", timeout=15000)
@@ -51,7 +53,7 @@ def test_create_heat_and_end_with_truthful_pending_shutdown(
         ).raise_for_status()
         expect(regulation).to_contain_text("Regolazione sospesa", timeout=15000)
         expect(regulation).to_contain_text("Effettivo: Sconosciuto")
-        page.get_by_role("button", name="Termina fermentazione", exact=True).click()
+        finish_fermentation(page)
         expect(
             page.get_by_role("heading", name="Storico: IPA riscaldata", exact=True)
         ).to_be_visible()
