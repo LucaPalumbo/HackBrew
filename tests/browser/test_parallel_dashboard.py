@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -212,7 +213,11 @@ def test_frequent_live_updates_do_not_cancel_slow_cards_and_detail_loads_forever
 
     page.route("**/api/fermentations**", delay_reads)
     page.goto(str(api.base_url) + "?fermentation=" + fermentation["id"])
-    page.wait_for_timeout(200)
+    # Begin the regression only after an actual HTTP response is held.
+    # A fixed startup sleep races bundle loading on a busy Docker host.
+    deadline = time.monotonic() + 10
+    while not pending and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
     initial_requests = list(pending)
     assert initial_requests
     try:
