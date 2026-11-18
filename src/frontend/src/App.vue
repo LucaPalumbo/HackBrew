@@ -115,7 +115,6 @@ const diagnosticReading = computed(
     pills.value.find((pill) => pill.id === diagnosticPillId.value)?.reading ??
     null,
 )
-const fermentation = ref<Fermentation | null>(null)
 const activeFermentations = ref<FermentationSummary[]>([])
 const selectedId = ref(
   new URLSearchParams(window.location.search).get('fermentation') || null,
@@ -201,7 +200,6 @@ function applySnapshot(snapshot: Snapshot) {
   pills.value = snapshot.pills
   if (!pills.value.some((pill) => pill.id === diagnosticPillId.value))
     diagnosticPillId.value = snapshot.pill_id ?? ''
-  fermentation.value = snapshot.fermentation
   activeFermentations.value = snapshot.active_fermentations
   communicationTimeout.value = snapshot.communication_timeout_seconds
   clock.value = performance.now()
