@@ -93,7 +93,14 @@ def test_end_during_outage_remains_final_and_blocks_reuse_until_confirmed_off(
         simulator.patch(
             "/__simulation", json={"state_http_status": 503, "control_http_status": 503}
         ).raise_for_status()
-        failed = wait_regulation(api, cycle, "suspended")
+        # Suspension is saved before the asynchronous OFF exchange finishes.
+        # Wait for the aggregate physical state to reflect the failed exchange too.
+        failed = wait_regulation(
+            api,
+            cycle,
+            "suspended",
+            condition=lambda state: state["regulation"]["actual_mode"] is None,
+        )
         assert failed["regulation"]["actual_mode"] is None
         ended = api.post(f"/api/fermentations/{cycle['id']}/end").json()["fermentation"]
         assert ended["status"] == "concluded"

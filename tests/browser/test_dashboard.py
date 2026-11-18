@@ -10,7 +10,7 @@ from tests.payloads import gateway_lettura
 
 def test_dashboard_explains_that_no_lettura_has_arrived(page: Page, api: httpx.Client) -> None:
     page.set_viewport_size({"width": 390, "height": 844})
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=diagnostics")
 
     expect(page.get_by_role("heading", name="In attesa della prima lettura")).to_be_visible()
     expect(page.get_by_role("button", name="Aggiorna lettura")).to_be_enabled()
@@ -22,7 +22,7 @@ def test_latest_lettura_is_visible_and_refreshable_on_desktop_and_phone(
 ) -> None:
     assert api.post("/telemetry", json=gateway_lettura()).status_code == 200
     page.set_viewport_size({"width": width, "height": height})
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=diagnostics")
 
     expect(
         page.get_by_role("region", name="Densità").get_by_text("1.050", exact=True)

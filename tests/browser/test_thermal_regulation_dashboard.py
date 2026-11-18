@@ -28,7 +28,7 @@ def test_select_compatible_devices_and_observe_full_shutdown(
         pill = api.get("/api/pills").json()["pills"][0]
         name = f"IPA {mode}"
         page.set_viewport_size({"width": width, "height": height})
-        page.goto(str(api.base_url))
+        page.goto(str(api.base_url) + "?page=new")
         page.get_by_label("Nome della fermentazione", exact=True).fill(name)
         page.get_by_label("Pillola della fermentazione", exact=True).select_option(pill["id"])
         page.get_by_label("Modalità della fermentazione", exact=True).select_option(mode)
@@ -68,7 +68,6 @@ def test_select_compatible_devices_and_observe_full_shutdown(
             "avviata"
         )
         temperature(api, 23)
-        page.get_by_role("button", name=f"Apri {name}").click()
         regulation = page.get_by_role("region", name=f"Regolazione {name}", exact=True)
         expect(regulation).to_contain_text("Raffreddamento attivo", timeout=15000)
         node = regulation.get_by_role("region", name=f"Stato {device['name']}", exact=True)

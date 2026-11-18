@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, nextTick, ref } from 'vue'
 import FermentationControls from './FermentationControls.vue'
 import FermentationArchive from './FermentationArchive.vue'
 import FermentationHistory from './FermentationHistory.vue'
 import PillRegistry from './PillRegistry.vue'
 import ThermalDeviceRegistry from './ThermalDeviceRegistry.vue'
 import SettingsPage from './SettingsPage.vue'
+import HomePage from './HomePage.vue'
+import NavigationIcon from './NavigationIcon.vue'
+import ReadingSummary from './ReadingSummary.vue'
+import { pillCommunication, type CommunicationClock } from './communication'
 import type { Fermentation, FermentationSummary } from './fermentations'
 import type { PillSnapshot, Reading } from './readings'
 
@@ -20,10 +24,72 @@ type Snapshot = {
   active_fermentations: FermentationSummary[]
 }
 
-const devicesPage =
-  new URLSearchParams(window.location.search).get('page') === 'devices'
-const settingsPage =
-  new URLSearchParams(window.location.search).get('page') === 'settings'
+type Page =
+  'home' | 'archive' | 'devices' | 'settings' | 'new' | 'diagnostics' | 'detail'
+const navigation = [
+  { page: 'home', label: 'Home' },
+  { page: 'archive', label: 'Archivio' },
+  { page: 'devices', label: 'Dispositivi' },
+  { page: 'settings', label: 'Impostazioni' },
+] as const
+const pageNames: Record<Page, string> = {
+  home: 'Home',
+  archive: 'Archivio',
+  devices: 'Dispositivi',
+  settings: 'Impostazioni',
+  new: 'Nuova fermentazione',
+  diagnostics: 'Diagnostica delle pillole',
+  detail: 'Dettaglio fermentazione',
+}
+function requestedPage(): Page {
+  const query = new URLSearchParams(window.location.search)
+  if (query.get('fermentation')) return 'detail'
+  const candidate = query.get('page') ?? 'home'
+  return Object.hasOwn(pageNames, candidate) ? (candidate as Page) : 'home'
+}
+const page = ref<Page>(requestedPage())
+const main = ref<HTMLElement>()
+const operationNotice = ref('')
+const activeNavigation = computed(() =>
+  page.value === 'detail'
+    ? 'home'
+    : page.value === 'diagnostics'
+      ? 'devices'
+      : page.value,
+)
+function destination(target: Page, identifier?: string) {
+  if (identifier) return `/?fermentation=${encodeURIComponent(identifier)}`
+  return target === 'home' ? '/' : `/?page=${target}`
+}
+function navigate(target: Page, identifier?: string) {
+  window.history.pushState(null, '', destination(target, identifier))
+  restoreSelection()
+  void nextTick(() => {
+    main.value?.focus({ preventScroll: true })
+    window.scrollTo({ top: 0 })
+  })
+}
+function follow(event: MouseEvent, target: Page) {
+  if (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  )
+    return
+  event.preventDefault()
+  navigate(target)
+}
+function created(cycle: Fermentation) {
+  operationNotice.value = `Fermentazione “${cycle.name}” avviata.`
+  navigate('detail', cycle.id)
+  void loadLatest()
+}
+function historyChanged() {
+  operationNotice.value = ''
+  void loadLatest()
+}
 const pills = ref<PillSnapshot[]>([])
 const diagnosticPillId = ref('')
 const diagnosticReading = computed(
@@ -33,25 +99,18 @@ const diagnosticReading = computed(
 )
 const fermentation = ref<Fermentation | null>(null)
 const activeFermentations = ref<FermentationSummary[]>([])
-const fermentationReading = ref<Reading | null>(null)
 const selectedId = ref(
   new URLSearchParams(window.location.search).get('fermentation') || null,
 )
 function selectFermentation(identifier: string | null) {
-  if (selectedId.value === identifier) return
-  const url = new URL(window.location.href)
-  if (identifier) url.searchParams.set('fermentation', identifier)
-  else url.searchParams.delete('fermentation')
-  window.history.pushState(null, '', url)
-  selectedId.value = identifier
+  navigate(identifier ? 'detail' : 'home', identifier ?? undefined)
 }
 function restoreSelection() {
+  page.value = requestedPage()
   selectedId.value =
     new URLSearchParams(window.location.search).get('fermentation') || null
 }
-const reading = computed(() =>
-  fermentation.value ? fermentationReading.value : diagnosticReading.value,
-)
+const reading = diagnosticReading
 const isLoading = ref(false)
 const hasSnapshot = ref(false)
 const error = ref('')
@@ -71,33 +130,30 @@ let communicationTimer: ReturnType<typeof setInterval> | undefined
 const communicationTimeout = ref<number | null>(null)
 const serverReference = ref<{ time: number; observedAt: number } | null>(null)
 const clock = ref(performance.now())
+const communicationClock = computed<CommunicationClock | null>(() => {
+  if (!serverReference.value || communicationTimeout.value === null) return null
+  return {
+    now:
+      serverReference.value.time +
+      (clock.value - serverReference.value.observedAt) / 1000,
+    timeout: communicationTimeout.value,
+  }
+})
 const dataStatus = computed(() => {
   if (!hasSnapshot.value) return 'Stato dei dati non disponibile'
-  if (!reading.value)
-    return fermentation.value ? 'In attesa di letture' : 'Nessuna lettura'
-  if (!serverReference.value || communicationTimeout.value === null)
-    return 'Verifica comunicazione…'
-  const serverNow =
-    serverReference.value.time +
-    (clock.value - serverReference.value.observedAt) / 1000
-  const identifier = fermentation.value?.pill_id ?? diagnosticPillId.value
-  const received = pills.value.find(
-    (pill) => pill.id === identifier,
-  )?.last_received_at
-  if (!received) return 'Nessuna comunicazione ricevuta'
-  return serverNow - new Date(received).getTime() / 1000 >=
-    communicationTimeout.value
-    ? 'Timeout di comunicazione superato'
-    : 'Lettura disponibile'
-})
-
-const temperatureFormat = new Intl.NumberFormat('it-IT', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-})
-const dateFormat = new Intl.DateTimeFormat('it-IT', {
-  dateStyle: 'medium',
-  timeStyle: 'medium',
+  if (!reading.value) return 'Nessuna lettura'
+  const status = pillCommunication(
+    pills.value.find((pill) => pill.id === diagnosticPillId.value),
+    communicationClock.value,
+    connection.value === 'live',
+  )
+  return {
+    unknown: 'Verifica comunicazione…',
+    never_received: 'Nessuna comunicazione ricevuta',
+    receiving: 'Lettura disponibile',
+    timed_out: 'Timeout di comunicazione superato',
+    unconfirmed_timeout: 'Timeout di comunicazione superato',
+  }[status]
 })
 
 async function loadLatest() {
@@ -128,7 +184,6 @@ function applySnapshot(snapshot: Snapshot) {
     diagnosticPillId.value = snapshot.pill_id ?? ''
   fermentation.value = snapshot.fermentation
   activeFermentations.value = snapshot.active_fermentations
-  fermentationReading.value = snapshot.fermentation_reading
   communicationTimeout.value = snapshot.communication_timeout_seconds
   clock.value = performance.now()
   serverReference.value = {
@@ -167,7 +222,6 @@ function disconnectLive() {
 }
 
 onMounted(() => {
-  if (settingsPage) return
   void loadLatest()
   window.addEventListener('offline', disconnectLive)
   window.addEventListener('online', connectLive)
@@ -186,269 +240,189 @@ onUnmounted(() => {
   clearInterval(communicationTimer)
 })
 </script>
-
 <template>
-  <div class="dashboard">
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="HackBrew, pagina iniziale">
-        <span class="brand-mark" aria-hidden="true">hb</span>
-        <span>Hack<span class="brand-accent">Brew</span></span>
-      </a>
-      <nav class="main-navigation" aria-label="Navigazione principale">
+  <div class="app-shell">
+    <a class="skip-navigation" href="#main-content">Vai al contenuto</a>
+    <aside class="app-sidebar">
+      <a
+        class="app-brand"
+        href="/"
+        aria-label="HackBrew, pagina iniziale"
+        @click="follow($event, 'home')"
+        ><span class="app-brand-mark" aria-hidden="true">hb</span>HackBrew</a
+      >
+      <span class="sidebar-caption">IL TUO BIRRIFICIO</span>
+      <nav aria-label="Navigazione principale">
         <a
-          href="/"
-          :aria-current="!devicesPage && !settingsPage ? 'page' : undefined"
-          >Monitoraggio</a
-        >
-        <a
-          href="/?page=devices"
-          :aria-current="devicesPage ? 'page' : undefined"
-          >Dispositivi</a
-        >
-        <a
-          href="/?page=settings"
-          :aria-current="settingsPage ? 'page' : undefined"
-          >Impostazioni</a
+          v-for="item in navigation"
+          :key="item.page"
+          :href="destination(item.page)"
+          :aria-current="activeNavigation === item.page ? 'page' : undefined"
+          @click="follow($event, item.page)"
+          ><NavigationIcon :name="item.page" /><span>{{ item.label }}</span></a
         >
       </nav>
-      <span class="mode">{{
-        settingsPage
-          ? 'Impostazioni globali'
-          : selectedId
-            ? 'Dettaglio fermentazione'
-            : !hasSnapshot
-              ? 'Monitoraggio non disponibile'
-              : activeFermentations.length > 1
-                ? 'Fermentazioni in corso'
-                : fermentation
-                  ? 'Fermentazione in corso'
-                  : 'Modalità diagnostica'
-      }}</span>
-    </header>
-
-    <main v-if="settingsPage"><SettingsPage /></main>
-    <main v-else-if="devicesPage">
-      <PillRegistry
-        :pills="pills"
-        :loading="isLoading"
-        :error="error"
-        @changed="loadLatest"
-      />
-      <p class="connection-status" role="status">{{ connectionStatus }}</p>
-      <ThermalDeviceRegistry />
-    </main>
-    <main v-else>
-      <div class="intro">
-        <div>
-          <p class="eyebrow">Il tuo fermentatore</p>
-          <h1>La tua pillola,<br />a colpo d’occhio.</h1>
-          <p class="description">
-            I valori della pillola, raccolti in un unico posto.
-          </p>
-        </div>
-        <button
-          v-if="!selectedId"
-          class="refresh"
-          type="button"
-          :disabled="isLoading"
-          @click="loadLatest"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
-            <path
-              d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 17.9 17"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.7"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-          {{ isLoading ? 'Aggiornamento…' : 'Aggiorna lettura' }}
-        </button>
-      </div>
-
-      <FermentationArchive
-        :recovery-revision="recoveryRevision"
-        :selected-id="selectedId"
-        :active-id="fermentation?.id ?? null"
-        :revision="historyRevision"
-        @select="selectFermentation"
-      />
-      <FermentationControls
-        v-if="!selectedId && hasSnapshot"
-        :fermentation="fermentation"
-        :loading="isLoading"
-        :pills="pills"
-        allow-start
-        @changed="loadLatest"
-      />
-      <p v-if="error && !selectedId" class="error" role="alert">{{ error }}</p>
-      <p
-        class="connection-status"
-        :class="{ error: connection === 'reconnecting' }"
-        :role="connection === 'reconnecting' ? 'alert' : 'status'"
-        aria-label="Collegamento live"
+      <a
+        class="create-fermentation"
+        href="/?page=new"
+        :aria-current="page === 'new' ? 'page' : undefined"
+        @click="follow($event, 'new')"
+        ><span aria-hidden="true">＋</span>Nuova fermentazione</a
       >
-        {{ connectionStatus }}
-      </p>
-      <template v-if="!selectedId">
-        <div v-if="!fermentation && pills.length" class="diagnostic-selection">
-          <label for="diagnostic-pill">Pillola diagnostica</label>
-          <select id="diagnostic-pill" v-model="diagnosticPillId">
-            <option v-for="pill in pills" :key="pill.id" :value="pill.id">
-              {{ pill.name }} · {{ pill.mac }}
-            </option>
-          </select>
-        </div>
+      <div class="sidebar-footer">
+        HackBrew<small>Il tuo spazio per fare buona birra.</small>
+      </div>
+    </aside>
+    <div class="app-content">
+      <header class="app-topbar">
+        <span
+          >Il tuo birrificio
+          <span class="app-breadcrumb">/ {{ pageNames[page] }}</span></span
+        >
         <p
-          class="data-status"
-          :class="{ stale: dataStatus === 'Timeout di comunicazione superato' }"
-          role="status"
-          aria-label="Stato dei dati"
+          class="live-connection"
+          :class="{ 'connection-error': connection === 'reconnecting' }"
+          :role="connection === 'reconnecting' ? 'alert' : 'status'"
+          aria-label="Collegamento live"
         >
-          {{ dataStatus }}
+          {{ connectionStatus }}
         </p>
-        <p v-if="isLoading && !reading" class="loading" role="status">
-          Caricamento lettura…
-        </p>
-
-        <section
-          v-else-if="hasSnapshot && !reading && !error"
-          class="empty"
-          aria-labelledby="empty-heading"
-        >
-          <span class="empty-symbol" aria-hidden="true">◌</span>
-          <p class="eyebrow">Pronti a ricevere</p>
-          <h2 id="empty-heading">
-            {{
-              fermentation
-                ? 'In attesa della prima lettura della fermentazione'
-                : 'In attesa della prima lettura'
-            }}
-          </h2>
-          <p v-if="fermentation">
-            Le letture acquisite dall’avvio di questa fermentazione appariranno
-            qui. I dati diagnostici precedenti restano separati.
-          </p>
-          <p v-else>
-            Non abbiamo ancora ricevuto dati dalla pillola. Le nuove letture
-            appariranno automaticamente qui.
-          </p>
-        </section>
-        <section v-else-if="reading" aria-label="Ultima lettura">
-          <div class="reading-heading">
-            <h2>Misure della pillola</h2>
-            <span>Ultima rilevazione disponibile</span>
-          </div>
-          <div class="metrics">
-            <section
-              class="metric metric-primary"
-              aria-labelledby="density-label"
-            >
-              <div class="metric-heading">
-                <h3 id="density-label">Densità</h3>
-                <span class="metric-symbol" aria-hidden="true">ρ</span>
-              </div>
-              <p class="metric-value">
-                <span>{{ reading.specific_gravity.toFixed(3) }}</span>
-                <span class="metric-unit">SG</span>
-              </p>
-              <p class="metric-caption">Densità relativa</p>
-            </section>
-            <section class="metric" aria-labelledby="temperature-label">
-              <div class="metric-heading">
-                <h3 id="temperature-label">Temperatura</h3>
-                <span class="metric-symbol" aria-hidden="true">°</span>
-              </div>
-              <p class="metric-value">
-                <span>{{ temperatureFormat.format(reading.temperature) }}</span>
-                <span class="metric-unit">°C</span>
-              </p>
-              <p class="metric-caption">Nel fermentatore</p>
-            </section>
-            <section class="metric" aria-labelledby="battery-label">
-              <div class="metric-heading">
-                <h3 id="battery-label">Batteria</h3>
-                <svg
-                  class="battery-icon"
-                  aria-hidden="true"
-                  viewBox="0 0 26 16"
-                >
-                  <rect
-                    x="1"
-                    y="2"
-                    width="21"
-                    height="12"
-                    rx="3"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                  <path
-                    d="M24 6v4"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                  />
-                </svg>
-              </div>
-              <p class="metric-value">
-                <span>{{ reading.battery.toFixed(0) }}</span>
-                <span class="metric-unit">%</span>
-              </p>
-              <div class="battery-track" aria-hidden="true">
-                <div :style="{ width: `${reading.battery}%` }"></div>
-              </div>
-              <p class="metric-caption">Carica della pillola</p>
-            </section>
-          </div>
-          <div class="acquisition">
-            <div>
-              <p class="eyebrow">Acquisizione della lettura</p>
-              <time
-                aria-label="Acquisizione della lettura"
-                :datetime="new Date(reading.timestamp * 1000).toISOString()"
-                >{{
-                  dateFormat.format(new Date(reading.timestamp * 1000))
-                }}</time
-              >
-            </div>
-            <p>
-              Ricevuta da HackBrew<br />
-              <time :datetime="reading.received_at">{{
-                dateFormat.format(new Date(reading.received_at))
-              }}</time>
+      </header>
+      <main id="main-content" ref="main" class="app-main" tabindex="-1">
+        <HomePage
+          v-if="page === 'home'"
+          :ready="hasSnapshot"
+          :clock="communicationClock"
+          :connected="connection === 'live'"
+          :loading="isLoading"
+          :error="error"
+          :active="activeFermentations"
+          :pills="pills"
+          :revision="historyRevision"
+          @select="selectFermentation"
+          @retry="loadLatest"
+        />
+        <template v-else-if="page === 'archive'"
+          ><div class="page-heading">
+            <p class="eyebrow">Tutte le tue birre</p>
+            <h1>Archivio</h1>
+            <p class="description">
+              Ritrova le tue fermentazioni e aprine il dettaglio.
             </p>
           </div>
-        </section>
-      </template>
-      <FermentationHistory
-        :recovery-revision="recoveryRevision"
-        :identifier="selectedId ?? fermentation?.id ?? null"
-        :revision="historyRevision"
-        :live="!selectedId"
-        @changed="loadLatest"
-      />
-      <footer class="footnote">
-        <span>{{
-          selectedId
-            ? 'Consultazione fermentazione'
-            : !hasSnapshot
-              ? 'Stato della fermentazione non disponibile'
-              : activeFermentations.length > 1
-                ? `${activeFermentations.length} fermentazioni attive`
-                : fermentation
-                  ? `Fermentazione attiva: ${fermentation.name}`
-                  : 'Nessuna fermentazione attiva'
-        }}</span>
-        <span>{{
-          selectedId
-            ? 'Valori dell’intervallo selezionato'
-            : fermentation
-              ? 'Ultima lettura della fermentazione'
-              : 'Ultima lettura della pillola'
-        }}</span>
-      </footer>
-    </main>
+          <FermentationArchive
+            :recovery-revision="recoveryRevision"
+            :selected-id="null"
+            :active-id="fermentation?.id ?? null"
+            :revision="historyRevision"
+            @select="selectFermentation"
+        /></template>
+        <template v-else-if="page === 'devices'"
+          ><PillRegistry
+            :pills="pills"
+            :loading="isLoading"
+            :error="error"
+            @changed="loadLatest" /><a
+            class="section-link"
+            href="/?page=diagnostics"
+            @click="follow($event, 'diagnostics')"
+            >Diagnostica delle pillole →</a
+          ><ThermalDeviceRegistry
+        /></template>
+        <SettingsPage v-else-if="page === 'settings'" />
+        <template v-else-if="page === 'new'"
+          ><div class="page-heading">
+            <p class="eyebrow">Un nuovo inizio</p>
+            <h1>Nuova fermentazione</h1>
+            <p class="description">
+              Scegli la pillola e la regolazione della tua prossima birra.
+            </p>
+          </div>
+          <p v-if="error" role="alert" class="error">
+            {{ error }}
+            <button type="button" class="text-button" @click="loadLatest">
+              Riprova
+            </button>
+          </p>
+          <FermentationControls
+            v-if="hasSnapshot"
+            :fermentation="null"
+            :loading="isLoading"
+            :pills="pills"
+            allow-start
+            @changed="created"
+          />
+          <p v-else role="status">Caricamento dispositivi…</p></template
+        >
+        <template v-else-if="page === 'detail'"
+          ><div class="detail-navigation">
+            <a href="/" @click="follow($event, 'home')">← Home</a
+            ><a href="/?page=archive" @click="follow($event, 'archive')"
+              >Archivio →</a
+            >
+          </div>
+          <p
+            v-if="operationNotice"
+            class="operation-notice"
+            role="status"
+            aria-label="Esito operazione"
+          >
+            {{ operationNotice }}
+          </p>
+          <FermentationHistory
+            :recovery-revision="recoveryRevision"
+            :identifier="selectedId"
+            :revision="historyRevision"
+            :live="false"
+            @changed="historyChanged"
+        /></template>
+        <template v-else-if="page === 'diagnostics'"
+          ><div class="page-heading">
+            <p class="eyebrow">Misure e comunicazione</p>
+            <h1>Diagnostica delle pillole</h1>
+            <p class="description">
+              L’ultima lettura di ogni pillola, anche senza una fermentazione.
+            </p>
+          </div>
+          <button
+            class="refresh"
+            type="button"
+            :disabled="isLoading"
+            @click="loadLatest"
+          >
+            {{ isLoading ? 'Aggiornamento…' : 'Aggiorna lettura' }}
+          </button>
+          <div v-if="pills.length" class="diagnostic-selection">
+            <label for="diagnostic-pill">Pillola diagnostica</label
+            ><select id="diagnostic-pill" v-model="diagnosticPillId">
+              <option v-for="pill in pills" :key="pill.id" :value="pill.id">
+                {{ pill.name }} · {{ pill.mac }}
+              </option>
+            </select>
+          </div>
+          <p
+            class="data-status"
+            :class="{
+              stale: dataStatus === 'Timeout di comunicazione superato',
+            }"
+            role="status"
+            aria-label="Stato dei dati"
+          >
+            {{ dataStatus }}
+          </p>
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
+          <ReadingSummary v-if="reading" :reading="reading" />
+          <section v-else-if="hasSnapshot && !error" class="empty">
+            <h2>In attesa della prima lettura</h2>
+            <p>
+              Le nuove letture della pillola appariranno automaticamente qui.
+            </p>
+            <a href="/?page=devices" @click="follow($event, 'devices')"
+              >Gestisci dispositivi</a
+            >
+          </section></template
+        >
+      </main>
+    </div>
   </div>
 </template>

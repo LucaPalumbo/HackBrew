@@ -149,7 +149,9 @@ def test_missing_optional_values_and_invalid_velocity_do_not_hide_other_measurem
     base = datetime.fromisoformat(cycle["started_at"]).timestamp() + 0.000123
     page.goto(str(api.base_url) + "?fermentation=" + cycle["id"])
     expect(
-        page.get_by_text("Nessuna lettura registrata per questa fermentazione.", exact=True)
+        page.get_by_role(
+            "heading", name="In attesa della prima lettura della fermentazione", exact=True
+        )
     ).to_be_visible()
     expect(page.get_by_role("img")).to_have_count(0)
     first = gateway_lettura(

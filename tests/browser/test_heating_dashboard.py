@@ -24,7 +24,7 @@ def test_create_heat_and_end_with_truthful_pending_shutdown(
         ).json()["device"]
         pill = api.get("/api/pills").json()["pills"][0]
         page.set_viewport_size({"width": width, "height": height})
-        page.goto(str(api.base_url))
+        page.goto(str(api.base_url) + "?page=new")
         page.get_by_label("Nome della fermentazione", exact=True).fill("IPA riscaldata")
         page.get_by_label("Pillola della fermentazione", exact=True).select_option(pill["id"])
         page.get_by_label("Modalità della fermentazione", exact=True).select_option("heating")
@@ -37,7 +37,6 @@ def test_create_heat_and_end_with_truthful_pending_shutdown(
             "avviata"
         )
         temperature(api, 17)
-        page.get_by_role("button", name="Apri IPA riscaldata").click()
         regulation = page.get_by_role("region", name="Regolazione IPA riscaldata", exact=True)
         expect(regulation).to_contain_text("Riscaldamento attivo", timeout=15000)
         expect(regulation).to_contain_text("Fascia: 18–22 °C")

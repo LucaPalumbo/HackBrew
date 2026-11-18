@@ -249,8 +249,10 @@ def main() -> None:
                 return
             current = browser.new_page(locale="it-IT", viewport={"width": 390, "height": 844})
             archive = browser.new_page(locale="it-IT", viewport={"width": 1440, "height": 1000})
-            current.goto(str(api.base_url))
-            archive.goto(str(api.base_url))
+            current.goto(
+                f"{str(api.base_url).rstrip('/')}/?fermentation={expected['active']['id']}"
+            )
+            archive.goto(str(api.base_url) + "?page=archive")
             archive.get_by_role("button", name="Apri Storico recupero").click()
             expect(
                 archive.get_by_role("heading", name="Storico: Storico recupero", exact=True)

@@ -1,6 +1,7 @@
 """Public HTTP helpers for real heating-control scenarios."""
 
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -47,12 +48,20 @@ def temperature(api: httpx.Client, value: float, mac: str = "AA:BB:CC:DD:EE:FF")
     ).raise_for_status()
 
 
-def wait_regulation(api: httpx.Client, cycle: dict[str, Any], status: str) -> dict[str, Any]:
+def wait_regulation(
+    api: httpx.Client,
+    cycle: dict[str, Any],
+    status: str,
+    *,
+    condition: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
     deadline = time.monotonic() + 15
     observed: dict[str, Any] = {}
     while time.monotonic() < deadline:
         observed = api.get(f"/api/fermentations/{cycle['id']}").json()["fermentation"]
-        if observed["regulation"]["status"] == status:
+        if observed["regulation"]["status"] == status and (
+            condition is None or condition(observed)
+        ):
             return observed
         time.sleep(0.05)
     raise AssertionError(f"Regulation did not reach {status}: {observed}")

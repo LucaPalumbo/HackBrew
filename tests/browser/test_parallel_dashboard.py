@@ -21,14 +21,16 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
         "pill"
     ]
     page.set_viewport_size({"width": width, "height": height})
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=new")
     page.get_by_label("Nome della fermentazione").fill("IPA parallela")
     page.get_by_label("Pillola della fermentazione").select_option(first_pill["id"])
     page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
     expect(page.get_by_role("heading", name="IPA parallela", exact=True)).to_be_visible()
+    page.get_by_role("link", name="Nuova fermentazione", exact=True).first.click()
     page.get_by_label("Nome della fermentazione").fill("Stout parallela")
     page.get_by_label("Pillola della fermentazione").select_option(second_pill["id"])
     page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
+    page.goto(str(api.base_url))
     overview = page.get_by_role("region", name="Fermentazioni", exact=True)
     first_card = overview.get_by_role("button", name=re.compile("^Apri IPA parallela"))
     second_card = overview.get_by_role("button", name=re.compile("^Apri Stout parallela"))
@@ -66,7 +68,12 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
     page.reload()
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
-    second_card.click()
+    overview_page = page.context.new_page()
+    overview_page.goto(str(api.base_url))
+    overview = overview_page.get_by_role("region", name="Fermentazioni", exact=True)
+    first_card = overview.get_by_role("button", name=re.compile("^Apri IPA parallela"))
+    second_card = overview.get_by_role("button", name=re.compile("^Apri Stout parallela"))
+    page.goto(f"{str(api.base_url).rstrip('/')}/?fermentation={second['id']}")
     expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
     page.go_back()
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
@@ -102,7 +109,7 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
         page.screenshot(path=path / f"fermentazioni-parallele-{width}.png", full_page=True)
     page.get_by_role("button", name="Termina fermentazione", exact=True).click()
     expect(page.get_by_role("heading", name="Storico: IPA parallela", exact=True)).to_be_visible()
-    expect(first_card).to_contain_text("Conclusa")
+    expect(first_card).to_have_count(0)
     assert (
         api.get(f"/api/fermentations/{second['id']}").json()["fermentation"]["status"] == "active"
     )
@@ -123,7 +130,7 @@ def test_pagination_keeps_requested_page_when_live_update_interrupts_loading(
     api.post(
         "/api/fermentations", json=fermentation_payload(api, "Attiva per paging")
     ).raise_for_status()
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=archive")
     overview = page.get_by_role("region", name="Fermentazioni", exact=True)
     expect(overview.get_by_role("button", name=re.compile("^Apri Attiva"))).to_be_visible()
     held: Route | None = None
@@ -225,8 +232,7 @@ def test_frequent_live_updates_do_not_cancel_slow_cards_and_detail_loads_forever
             with suppress(PlaywrightError):
                 route.fulfill(response=response)
             pending.remove((route, response))
-        card = page.get_by_role("button", name=re.compile("^Apri IPA rete lenta"))
-        expect(card).to_contain_text("1.030")
+        expect(page.get_by_role("region", name="Densità")).to_contain_text("1.030")
         table = page.get_by_role("table", name="Letture della fermentazione")
         expect(table.get_by_role("cell", name="1.030", exact=True)).to_be_visible()
         expect(page.get_by_role("button", name="Termina fermentazione", exact=True)).to_be_enabled()
@@ -258,7 +264,7 @@ def test_background_retry_does_not_invent_empty_cards_after_failed_initial_load(
             pending.append((route, route.fetch()))
 
     page.route("**/api/fermentations?*", fail_then_delay)
-    page.goto(str(api.base_url))
+    page.goto(str(api.base_url) + "?page=archive")
     assert (
         api.post(
             "/telemetry", json=gateway_lettura(timestamp=datetime.now(UTC).timestamp())

@@ -41,9 +41,11 @@ def test_independent_cycles_keep_frozen_history_across_network_reconnections(
         page.context.set_offline(False)
         view.reconnect()
         system.feed("ipa", "cold")
-        expect(page.get_by_role("button", name="Apri IPA integrata", exact=False)).to_contain_text(
-            "14,9 °C", timeout=15000
-        )
+        overview = page.context.new_page()
+        overview.goto(str(api.base_url))
+        expect(
+            overview.get_by_role("button", name="Apri IPA integrata", exact=False)
+        ).to_contain_text("14,9 °C", timeout=15000)
         view.assert_preserved()
         page.get_by_role("button", name="Torna al live", exact=True).click()
         expect(page.get_by_label("Intervallo visualizzato")).not_to_have_text(view.interval)
