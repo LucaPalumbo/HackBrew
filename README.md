@@ -37,6 +37,8 @@ Apri **Nuova fermentazione** e segui i tre passaggi:
 
 **Indietro** conserva le scelte durante la procedura. **Annulla** torna alla Home senza creare cicli o riserve; una nuova procedura parte vuota, senza bozze persistenti. Il server ricontrolla disponibilità e vincoli all'avvio. Un conflitto conserva i dati inseriti: torna ai passaggi precedenti per scegliere risorse libere e conferma nuovamente. Durante l'invio i comandi sono disabilitati. Se la risposta non arriva, il messaggio invita a controllare la Home prima di riprovare: l'assenza di conferma non dimostra che il server non abbia creato il ciclo.
 
+Screenshot dalla suite browser: [riepilogo desktop](docs/screenshots/creation-wizard-desktop.png) e [nome e pillola su telefono](docs/screenshots/creation-wizard-mobile.png).
+
 ## Requisiti e avvio
 
 Servono Docker Engine e Docker Compose. Node, Python, MongoDB e i browser di test vengono gestiti nei container. I comandi seguenti usano una shell POSIX.
