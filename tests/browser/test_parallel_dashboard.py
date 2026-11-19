@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 from playwright.sync_api import APIResponse, Page, Route, expect
 from playwright.sync_api import Error as PlaywrightError
 
+from tests.browser.navigation import finish_fermentation, show_management
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -25,7 +27,7 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
     page.get_by_label("Nome della fermentazione").fill("IPA parallela")
     page.get_by_label("Pillola della fermentazione").select_option(first_pill["id"])
     page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
-    expect(page.get_by_role("heading", name="IPA parallela", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Dettaglio: IPA parallela", exact=True)).to_be_visible()
     page.get_by_role("link", name="Nuova fermentazione", exact=True).first.click()
     page.get_by_label("Nome della fermentazione").fill("Stout parallela")
     page.get_by_label("Pillola della fermentazione").select_option(second_pill["id"])
@@ -107,7 +109,7 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=path / f"fermentazioni-parallele-{width}.png", full_page=True)
-    page.get_by_role("button", name="Termina fermentazione", exact=True).click()
+    finish_fermentation(page)
     expect(page.get_by_role("heading", name="Storico: IPA parallela", exact=True)).to_be_visible()
     expect(first_card).to_have_count(0)
     assert (
@@ -132,7 +134,7 @@ def test_pagination_keeps_requested_page_when_live_update_interrupts_loading(
     ).raise_for_status()
     page.goto(str(api.base_url) + "?page=archive")
     overview = page.get_by_role("region", name="Fermentazioni", exact=True)
-    expect(overview.get_by_role("button", name=re.compile("^Apri Attiva"))).to_be_visible()
+    expect(overview.get_by_role("button", name=re.compile("^Apri Archivio 20"))).to_be_visible()
     held: Route | None = None
 
     def hold_first_older_page(route: Route) -> None:
@@ -211,7 +213,11 @@ def test_frequent_live_updates_do_not_cancel_slow_cards_and_detail_loads_forever
 
     page.route("**/api/fermentations**", delay_reads)
     page.goto(str(api.base_url) + "?fermentation=" + fermentation["id"])
-    page.wait_for_timeout(200)
+    # Begin the regression only after an actual HTTP response is held.
+    # A fixed startup sleep races bundle loading on a busy Docker host.
+    deadline = time.monotonic() + 10
+    while not pending and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
     initial_requests = list(pending)
     assert initial_requests
     try:
@@ -235,6 +241,7 @@ def test_frequent_live_updates_do_not_cancel_slow_cards_and_detail_loads_forever
         expect(page.get_by_role("region", name="Densità")).to_contain_text("1.030")
         table = page.get_by_role("table", name="Letture della fermentazione")
         expect(table.get_by_role("cell", name="1.030", exact=True)).to_be_visible()
+        show_management(page)
         expect(page.get_by_role("button", name="Termina fermentazione", exact=True)).to_be_enabled()
     finally:
         for route, _ in pending:
@@ -246,9 +253,10 @@ def test_background_retry_does_not_invent_empty_cards_after_failed_initial_load(
     page: Page,
     api: httpx.Client,
 ) -> None:
-    api.post(
+    cycle = api.post(
         "/api/fermentations", json=fermentation_payload(api, "IPA da recuperare")
-    ).raise_for_status()
+    ).json()["fermentation"]
+    api.post(f"/api/fermentations/{cycle['id']}/end").raise_for_status()
     pending: list[tuple[Route, APIResponse]] = []
     failed = False
     release_new_requests = False
@@ -275,9 +283,11 @@ def test_background_retry_does_not_invent_empty_cards_after_failed_initial_load(
     assert pending
     overview = page.get_by_role("region", name="Fermentazioni", exact=True)
     try:
-        expect(overview.get_by_text("Nessuna fermentazione registrata.", exact=True)).to_have_count(
-            0
-        )
+        expect(
+            overview.get_by_text(
+                "Nessuna fermentazione conclusa. Le birre in corso sono nella Home.", exact=True
+            )
+        ).to_have_count(0)
         expect(overview.get_by_role("alert")).to_contain_text("Non è stato possibile recuperare")
         release_new_requests = True
         for route, response in pending:

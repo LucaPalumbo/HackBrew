@@ -31,7 +31,10 @@ def test_period_loads_all_pages_and_freezes_until_return_to_live(
     for index in range(405):
         api.post("/telemetry", json=gateway_lettura(timestamp=base + index * 60)).raise_for_status()
     page.goto(str(api.base_url) + "?fermentation=" + cycle["id"])
-    expect(page.get_by_role("img", name="Grafico a linee: 405 letture", exact=True)).to_be_visible()
+    # Loading all pages shares the application's ten-second request budget.
+    expect(page.get_by_role("img", name="Grafico a linee: 405 letture", exact=True)).to_be_visible(
+        timeout=15000
+    )
     page.get_by_label("Batteria %", exact=True).uncheck()
     for rows in (201, 6):
         page.get_by_role("button", name="Letture precedenti", exact=True).click()

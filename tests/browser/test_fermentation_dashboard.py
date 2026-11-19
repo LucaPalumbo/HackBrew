@@ -4,7 +4,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, Route, expect
 
-from tests.browser.navigation import open_active_fermentation
+from tests.browser.navigation import finish_fermentation, open_active_fermentation, show_management
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -18,7 +18,7 @@ def test_start_read_and_end_fermentazione_without_reusing_diagnostic_history(
     page.get_by_label("Nome della fermentazione").fill("Prima IPA")
     page.get_by_label("Pillola della fermentazione").select_option(index=1)
     page.get_by_role("button", name="Avvia fermentazione").click()
-    expect(page.get_by_role("heading", name="Prima IPA", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Dettaglio: Prima IPA", exact=True)).to_be_visible()
     expect(
         page.get_by_role("heading", name="In attesa della prima lettura della fermentazione")
     ).to_be_visible()
@@ -38,13 +38,13 @@ def test_start_read_and_end_fermentazione_without_reusing_diagnostic_history(
         page.get_by_role("region", name="Densità").get_by_text("1.040", exact=True)
     ).to_be_visible()
     page.reload()
-    expect(page.get_by_role("heading", name="Prima IPA", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Dettaglio: Prima IPA", exact=True)).to_be_visible()
     expect(
         page.get_by_role("region", name="Densità").get_by_text("1.040", exact=True)
     ).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
-    page.get_by_role("button", name="Termina fermentazione").click()
+    finish_fermentation(page)
     expect(page.get_by_role("status", name="Esito operazione")).to_contain_text("conclusa")
     assert api.get("/api/fermentations/active").json()["fermentation"] is None
     ended = api.get(f"/api/fermentations/{first['id']}").json()["fermentation"]
@@ -56,13 +56,13 @@ def test_start_read_and_end_fermentazione_without_reusing_diagnostic_history(
     page.get_by_label("Nome della fermentazione").fill("Seconda IPA")
     page.get_by_label("Pillola della fermentazione").select_option(index=1)
     page.get_by_role("button", name="Avvia fermentazione").click()
-    expect(page.get_by_role("heading", name="Seconda IPA", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Dettaglio: Seconda IPA", exact=True)).to_be_visible()
     expect(
         page.get_by_role("heading", name="In attesa della prima lettura della fermentazione")
     ).to_be_visible()
     expect(page.get_by_role("region", name="Densità")).to_have_count(0)
     page.reload()
-    expect(page.get_by_role("heading", name="Seconda IPA", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Dettaglio: Seconda IPA", exact=True)).to_be_visible()
     expect(
         page.get_by_role("heading", name="In attesa della prima lettura della fermentazione")
     ).to_be_visible()
@@ -104,15 +104,18 @@ def test_failed_end_keeps_active_state_and_can_be_retried(page: Page, api: httpx
     page.set_viewport_size({"width": 390, "height": 844})
     open_active_fermentation(page, api)
     page.route("**/api/fermentations/*/end", lambda route: route.abort("connectionfailed"))
-    page.get_by_role("button", name="Termina fermentazione").click()
+    finish_fermentation(page)
     expect(page.get_by_role("alert")).to_contain_text("Non è stato possibile confermare")
     expect(page.get_by_role("status", name="Esito operazione")).to_have_count(0)
+    page.get_by_role("dialog", name="Concludi la fermentazione").get_by_role(
+        "button", name="Annulla", exact=True
+    ).click()
     expect(page.get_by_role("heading", name="IPA da terminare", exact=True)).to_be_visible()
     assert api.get("/api/fermentations/active").json()["fermentation"]["id"] == first["id"]
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
     page.unroute("**/api/fermentations/*/end")
-    page.get_by_role("button", name="Termina fermentazione").click()
+    finish_fermentation(page)
     expect(page.get_by_role("status", name="Esito operazione")).to_contain_text("conclusa")
     expect(page.get_by_role("alert")).to_have_count(0)
     assert api.get("/api/fermentations/active").json()["fermentation"] is None
@@ -123,6 +126,7 @@ def test_long_fermentazione_name_remains_readable_on_phone(page: Page, api: http
     assert api.post("/api/fermentations", json=fermentation_payload(api, name)).status_code == 201
     page.set_viewport_size({"width": 390, "height": 844})
     open_active_fermentation(page, api)
-    expect(page.get_by_role("heading", name=name, exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name=f"Dettaglio: {name}", exact=True)).to_be_visible()
+    show_management(page)
     expect(page.get_by_role("button", name="Termina fermentazione")).to_be_enabled()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

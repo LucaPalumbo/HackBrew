@@ -1,6 +1,8 @@
 import type { Reading } from './readings'
 import type { Capability, ThermalMode } from './thermalDevices'
 
+export type FermentationTab = 'trend' | 'management'
+
 export const controlModeNames = {
   monitor_only: 'Solo monitoraggio',
   heating: 'Riscaldamento',

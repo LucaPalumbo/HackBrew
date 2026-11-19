@@ -6,6 +6,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import finish_fermentation, show_management
 from tests.heating import temperature
 from tests.thermal import thermal_simulator
 from tests.thermal_regulation import register_thermal
@@ -67,6 +68,7 @@ def test_select_compatible_devices_and_observe_full_shutdown(
         expect(page.get_by_role("status", name="Esito operazione", exact=True)).to_contain_text(
             "avviata"
         )
+        show_management(page)
         temperature(api, 23)
         regulation = page.get_by_role("region", name=f"Regolazione {name}", exact=True)
         expect(regulation).to_contain_text("Raffreddamento attivo", timeout=15000)
@@ -84,7 +86,7 @@ def test_select_compatible_devices_and_observe_full_shutdown(
                 path=Path(directory) / f"termoregolazione-{mode}-{width}.png", full_page=True
             )
         active.patch("/__simulation", json={"confirmation_available": False}).raise_for_status()
-        page.get_by_role("button", name="Termina fermentazione", exact=True).click()
+        finish_fermentation(page)
         expect(regulation).to_contain_text("Spegnimento in attesa di conferma")
         expect(node).to_contain_text("Effettivo: Sconosciuto")
         expect(node).to_contain_text("Dispositivo ancora riservato")

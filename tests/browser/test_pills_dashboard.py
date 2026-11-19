@@ -97,7 +97,7 @@ def test_choose_registered_pillola_for_diagnostics_and_fermentazione(
     page.get_by_label("Nome della fermentazione").fill("Stout scelta")
     page.get_by_label("Pillola della fermentazione").select_option(second["id"])
     page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
-    expect(page.get_by_role("heading", name="Stout scelta", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Dettaglio: Stout scelta", exact=True)).to_be_visible()
     fermentation = api.get("/api/fermentations/active").json()["fermentation"]
     assert fermentation["pill_id"] == second["id"]
     assert (

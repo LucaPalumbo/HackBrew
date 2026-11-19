@@ -7,6 +7,7 @@ import httpx
 import pytest
 from playwright.sync_api import APIResponse, Page, Route, expect
 
+from tests.browser.navigation import finish_fermentation, show_management
 from tests.heating import start_heating, temperature, wait_regulation
 from tests.thermal import thermal_simulator
 
@@ -21,6 +22,7 @@ def test_edit_settings_history_reload_and_read_only_end(
         wait_regulation(api, cycle, "heating")
         page.set_viewport_size({"width": width, "height": 1000})
         page.goto(f"{api.base_url}?fermentation={cycle['id']}")
+        show_management(page)
         editor = page.get_by_role("region", name="Impostazioni termiche", exact=True)
         expect(editor.get_by_label("Nuova temperatura minima (°C)")).to_have_value("18")
         editor.get_by_label("Nuova temperatura minima (°C)").fill("16")
@@ -43,7 +45,7 @@ def test_edit_settings_history_reload_and_read_only_end(
             page.screenshot(
                 path=Path(directory) / f"impostazioni-termiche-{width}.png", full_page=True
             )
-        page.get_by_role("button", name="Termina fermentazione", exact=True).click()
+        finish_fermentation(page)
         expect(editor.get_by_role("button", name="Salva impostazioni termiche")).to_have_count(0)
         expect(history.get_by_role("row")).to_have_count(3)
 
@@ -58,6 +60,7 @@ def test_conflict_validation_save_failure_and_unconfirmed_device_are_visible(
         wait_regulation(api, cycle, "heating")
         page.set_viewport_size({"width": width, "height": 1000})
         page.goto(f"{api.base_url}?fermentation={cycle['id']}")
+        show_management(page)
         editor = page.get_by_role("region", name="Impostazioni termiche", exact=True)
         low = editor.get_by_label("Nuova temperatura minima (°C)")
         expect(low).to_have_value("18")
@@ -129,6 +132,7 @@ def test_delayed_save_response_cannot_replace_newer_settings_or_reopen_end(
     with thermal_simulator("heating") as simulator:
         cycle = start_heating(api, simulator)
         page.goto(f"{api.base_url}?fermentation={cycle['id']}")
+        show_management(page)
         editor = page.get_by_role("region", name="Impostazioni termiche", exact=True)
         low = editor.get_by_label("Nuova temperatura minima (°C)")
         expect(low).to_have_value("18")

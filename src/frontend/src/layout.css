@@ -235,6 +235,11 @@
 .app-main .history-data {
   margin-top: 0;
 }
+.app-main .archive {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
 .skip-navigation {
   position: fixed;
   top: -100px;

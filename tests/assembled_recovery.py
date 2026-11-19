@@ -11,6 +11,7 @@ import httpx
 from playwright.sync_api import Browser, Page, expect
 
 from tests.assembled_system import AssembledSystem, FrozenHistory
+from tests.browser.navigation import finish_fermentation, show_management
 from tests.database import reset_test_database
 from tests.heating import wait_regulation
 from tests.heating_recovery import wait_device
@@ -274,6 +275,8 @@ def verify_assembled_recovery(
         system.feed("ipa", "valid")
         system.feed("ipa", "invalid_velocity")
         wait_regulation(api, system.cycles["ipa"], "cooling")
+        show_management(desktop)
+        show_management(mobile)
         expect(
             desktop.get_by_role("region", name="Regolazione IPA integrata", exact=True)
         ).to_contain_text("Raffreddamento attivo", timeout=15000)
@@ -281,6 +284,7 @@ def verify_assembled_recovery(
             mobile.get_by_role("region", name="Regolazione Lager integrata", exact=True)
         ).to_contain_text("Spegnimento confermato", timeout=15000)
         for view in (ipa, lager):
+            view.page.get_by_role("tab", name="Andamento", exact=True).click()
             view.assert_preserved()
             evidence(view, "recupero")
         expect(
@@ -288,7 +292,7 @@ def verify_assembled_recovery(
         ).to_be_visible()
         desktop.get_by_role("button", name="Torna al live", exact=True).click()
         expect(desktop.get_by_label("Intervallo visualizzato")).not_to_have_text(ipa.interval)
-        desktop.get_by_role("button", name="Termina fermentazione", exact=True).click()
+        finish_fermentation(desktop)
         wait_regulation(api, system.cycles["ipa"], "stopped")
         assert all(
             simulator.get("/api/v1/state").json()["actual_mode"] == "off"
