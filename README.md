@@ -8,7 +8,7 @@ Frontend Vue 3 con TypeScript e Vite, grafici Chart.js, backend Python/FastAPI e
 
 La **Home** mostra tutte le fermentazioni attive con le rispettive ultime letture e lo stato di comunicazione. Se non ci sono attive propone le tre concluse più recenti, con periodo di avvio e termine e senza batteria. Al primo avvio mostra i collegamenti per registrare i dispositivi e iniziare un ciclo. Se il collegamento si interrompe, le card conservano i valori ricevuti e segnalano quando l’ultima comunicazione confermata supera il timeout; alla riconnessione si aggiornano dallo stato del server.
 
-La navigazione laterale su computer e inferiore sul telefono porta a **Home**, **Archivio**, **Dispositivi** e **Impostazioni**. **Nuova fermentazione** apre il modulo dedicato; dopo l'avvio si apre il dettaglio del ciclo creato. L'**Archivio** contiene soltanto le fermentazioni concluse, con ricerca per nome e paginazione. Ricerca e pagina vengono conservate nel collegamento, anche tornando indietro dal dettaglio. Le card delle concluse mostrano avvio, termine e ultime misure, senza batteria.
+La navigazione laterale su computer e inferiore sul telefono porta a **Home**, **Archivio**, **Dispositivi** e **Impostazioni**. **Nuova fermentazione** apre la procedura dedicata in tre passaggi; dopo l'avvio si apre l'**Andamento** del ciclo creato. L'**Archivio** contiene soltanto le fermentazioni concluse, con ricerca per nome e paginazione. Ricerca e pagina vengono conservate nel collegamento, anche tornando indietro dal dettaglio. Le card delle concluse mostrano avvio, termine e ultime misure, senza batteria.
 
 Ogni card apre un dettaglio distinto. **Andamento** è la scheda iniziale, con grafico e navigazione temporale, letture e riepilogo delle ultime misure: laterale sul computer e sotto il grafico sul telefono. **Gestione** mostra le associazioni scelte all'avvio, la regolazione e, per i cicli regolati, soglie e cronologia revisionata. Le schede funzionano anche con frecce, Home e Fine; cambiarle conserva il periodo del grafico e le modifiche non ancora salvate delle soglie.
 
@@ -26,6 +26,16 @@ Destinazioni raggiungibili anche direttamente:
 | Diagnostica delle pillole | `http://localhost:8080/?page=diagnostics` |
 
 La diagnostica è accessibile anche da Dispositivi e permette di scegliere una pillola e aggiornare l'ultima lettura senza avviare un ciclo. I collegamenti esistenti `?fermentation=<id>` aprono l'Andamento; `?fermentation=<id>&tab=management` apre Gestione. Ricaricamento e Indietro/Avanti del browser mantengono la scheda. Una fermentazione inesistente è distinta da un errore di rete e offre collegamenti per uscire. Il passaggio alla nuova navigazione conserva il volume e non richiede un reset dei dati.
+
+## Avviare una fermentazione
+
+Apri **Nuova fermentazione** e segui i tre passaggi:
+
+1. **Nome e pillola**: inserisci un nome e scegli una pillola libera registrata in Dispositivi.
+2. **Regolazione**: scegli solo monitoraggio, riscaldamento, raffreddamento, due dispositivi separati oppure un dispositivo combinato. Compaiono solo i dispositivi compatibili disponibili e le soglie necessarie. L'isteresi deve essere positiva e può essere uguale all'intera fascia tra minimo e massimo. Solo monitoraggio non invia dispositivi né soglie.
+3. **Riepilogo**: controlla le scelte e premi **Avvia fermentazione**. Solo questa conferma crea il ciclo e riserva pillola e dispositivi. Si apre l'Andamento del ciclo restituito dal server, inizialmente in attesa della prima lettura; la diagnostica precedente resta separata.
+
+**Indietro** conserva le scelte durante la procedura. **Annulla** torna alla Home senza creare cicli o riserve; una nuova procedura parte vuota, senza bozze persistenti. Il server ricontrolla disponibilità e vincoli all'avvio. Un conflitto conserva i dati inseriti: torna ai passaggi precedenti per scegliere risorse libere e conferma nuovamente. Durante l'invio i comandi sono disabilitati. Se la risposta non arriva, il messaggio invita a controllare la Home prima di riprovare: l'assenza di conferma non dimostra che il server non abbia creato il ciclo.
 
 ## Requisiti e avvio
 
@@ -301,6 +311,7 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/integration/test_readings.py -k older
 ./scripts/hackbrew test tests/browser/test_navigation_dashboard.py
 ./scripts/hackbrew test tests/browser/test_archive_detail.py
+./scripts/hackbrew test tests/browser/test_creation_wizard.py
 ./scripts/hackbrew test tests/browser/test_dashboard.py
 ./scripts/hackbrew test tests/integration/test_live_readings.py
 ./scripts/hackbrew test tests/browser/test_live_dashboard.py

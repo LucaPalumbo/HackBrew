@@ -17,6 +17,8 @@ def test_start_read_and_end_fermentazione_without_reusing_diagnostic_history(
     page.goto(str(api.base_url) + "?page=new")
     page.get_by_label("Nome della fermentazione").fill("Prima IPA")
     page.get_by_label("Pillola della fermentazione").select_option(index=1)
+    page.get_by_role("button", name="Avanti", exact=True).click()
+    page.get_by_role("button", name="Avanti", exact=True).click()
     page.get_by_role("button", name="Avvia fermentazione").click()
     expect(page.get_by_role("heading", name="Dettaglio: Prima IPA", exact=True)).to_be_visible()
     expect(
@@ -55,6 +57,8 @@ def test_start_read_and_end_fermentazione_without_reusing_diagnostic_history(
     page.get_by_role("link", name="Nuova fermentazione", exact=True).first.click()
     page.get_by_label("Nome della fermentazione").fill("Seconda IPA")
     page.get_by_label("Pillola della fermentazione").select_option(index=1)
+    page.get_by_role("button", name="Avanti", exact=True).click()
+    page.get_by_role("button", name="Avanti", exact=True).click()
     page.get_by_role("button", name="Avvia fermentazione").click()
     expect(page.get_by_role("heading", name="Dettaglio: Seconda IPA", exact=True)).to_be_visible()
     expect(
@@ -74,7 +78,7 @@ def test_invalid_name_and_conflicting_start_are_visible_without_replacing_active
     page.goto(str(api.base_url) + "?page=new")
     page.get_by_label("Nome della fermentazione").fill("   ")
     page.get_by_label("Pillola della fermentazione").select_option(index=1)
-    page.get_by_role("button", name="Avvia fermentazione").click()
+    page.get_by_role("button", name="Avanti").click()
     expect(page.get_by_role("alert")).to_have_text("Inserisci un nome per la fermentazione.")
     assert api.get("/api/fermentations/active").json()["fermentation"] is None
 
@@ -89,6 +93,8 @@ def test_invalid_name_and_conflicting_start_are_visible_without_replacing_active
 
     page.route("**/api/fermentations", competing_start)
     page.get_by_label("Nome della fermentazione").fill("IPA concorrente")
+    page.get_by_role("button", name="Avanti", exact=True).click()
+    page.get_by_role("button", name="Avanti", exact=True).click()
     page.get_by_role("button", name="Avvia fermentazione").click()
     expect(page.get_by_role("alert")).to_contain_text("già una fermentazione attiva")
     expect(page.get_by_role("status", name="Esito operazione")).to_have_count(0)

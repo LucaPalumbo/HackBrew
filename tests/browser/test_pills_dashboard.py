@@ -16,7 +16,8 @@ def api(empty_api: httpx.Client) -> httpx.Client:
 
 def test_first_start_requires_registering_a_pillola(page: Page, api: httpx.Client) -> None:
     page.goto(str(api.base_url) + "?page=new")
-    expect(page.get_by_role("button", name="Avvia fermentazione", exact=True)).to_be_disabled()
+    expect(page.get_by_role("button", name="Avanti", exact=True)).to_be_disabled()
+    expect(page.get_by_role("button", name="Avvia fermentazione", exact=True)).to_have_count(0)
     expect(page.get_by_text("Registra prima una pillola nella pagina Dispositivi.")).to_be_visible()
 
 
@@ -96,6 +97,8 @@ def test_choose_registered_pillola_for_diagnostics_and_fermentazione(
     page.get_by_role("link", name="Nuova fermentazione", exact=True).first.click()
     page.get_by_label("Nome della fermentazione").fill("Stout scelta")
     page.get_by_label("Pillola della fermentazione").select_option(second["id"])
+    page.get_by_role("button", name="Avanti", exact=True).click()
+    page.get_by_role("button", name="Avanti", exact=True).click()
     page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
     expect(page.get_by_role("heading", name="Dettaglio: Stout scelta", exact=True)).to_be_visible()
     fermentation = api.get("/api/fermentations/active").json()["fermentation"]

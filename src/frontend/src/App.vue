@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, nextTick, ref } from 'vue'
-import FermentationControls from './FermentationControls.vue'
+import FermentationWizard from './FermentationWizard.vue'
 import FermentationArchive from './FermentationArchive.vue'
 import FermentationHistory from './FermentationHistory.vue'
 import PillRegistry from './PillRegistry.vue'
@@ -359,13 +359,13 @@ onUnmounted(() => {
               Riprova
             </button>
           </p>
-          <FermentationControls
+          <FermentationWizard
             v-if="hasSnapshot"
-            :fermentation="null"
             :loading="isLoading"
             :pills="pills"
-            allow-start
-            @changed="created"
+            @created="created"
+            @cancelled="navigate('home')"
+            @refresh="loadLatest"
           />
           <p v-else role="status">Caricamento dispositivi…</p></template
         >
