@@ -28,11 +28,13 @@ def test_create_heat_and_end_with_truthful_pending_shutdown(
         page.goto(str(api.base_url) + "?page=new")
         page.get_by_label("Nome della fermentazione", exact=True).fill("IPA riscaldata")
         page.get_by_label("Pillola della fermentazione", exact=True).select_option(pill["id"])
+        page.get_by_role("button", name="Avanti", exact=True).click()
         page.get_by_label("Modalità della fermentazione", exact=True).select_option("heating")
         page.get_by_label("Dispositivo di riscaldamento", exact=True).select_option(device["id"])
         page.get_by_label("Temperatura minima (°C)", exact=True).fill("18")
         page.get_by_label("Temperatura massima (°C)", exact=True).fill("22")
         page.get_by_label("Isteresi (°C)", exact=True).fill("0.5")
+        page.get_by_role("button", name="Avanti", exact=True).click()
         page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
         expect(page.get_by_role("status", name="Esito operazione", exact=True)).to_contain_text(
             "avviata"

@@ -32,11 +32,12 @@ def test_select_compatible_devices_and_observe_full_shutdown(
         page.goto(str(api.base_url) + "?page=new")
         page.get_by_label("Nome della fermentazione", exact=True).fill(name)
         page.get_by_label("Pillola della fermentazione", exact=True).select_option(pill["id"])
+        page.get_by_role("button", name="Avanti", exact=True).click()
         page.get_by_label("Modalità della fermentazione", exact=True).select_option(mode)
         if mode == "heating_cooling":
             field = page.get_by_label("Dispositivo di riscaldamento", exact=True)
             expect(field.get_by_role("option")).to_have_text(
-                ["Scegli un dispositivo", devices["heating"]["name"]]
+                ["Scegli un dispositivo libero", devices["heating"]["name"]]
             )
             field.select_option(devices["heating"]["id"])
         else:
@@ -44,7 +45,7 @@ def test_select_compatible_devices_and_observe_full_shutdown(
         if mode != "combined":
             field = page.get_by_label("Dispositivo di raffreddamento", exact=True)
             expect(field.get_by_role("option")).to_have_text(
-                ["Scegli un dispositivo", devices["cooling"]["name"]]
+                ["Scegli un dispositivo libero", devices["cooling"]["name"]]
             )
             field.select_option(devices["cooling"]["id"])
             active = simulators["cooling"]
@@ -54,16 +55,17 @@ def test_select_compatible_devices_and_observe_full_shutdown(
             expect(page.get_by_label("Dispositivo di raffreddamento", exact=True)).to_have_count(0)
             field = page.get_by_label("Dispositivo combinato", exact=True)
             expect(field.get_by_role("option")).to_have_text(
-                ["Scegli un dispositivo", devices["both"]["name"]]
+                ["Scegli un dispositivo libero", devices["both"]["name"]]
             )
             field.select_option(devices["both"]["id"])
             active = simulators["both"]
             device = devices["both"]
         page.get_by_label("Temperatura minima (°C)", exact=True).fill("22")
-        page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
+        page.get_by_role("button", name="Avanti", exact=True).click()
         expect(page.get_by_role("alert")).to_contain_text("Minimo")
         assert api.get("/api/fermentations/active").json()["fermentations"] == []
         page.get_by_label("Temperatura minima (°C)", exact=True).fill("18")
+        page.get_by_role("button", name="Avanti", exact=True).click()
         page.get_by_role("button", name="Avvia fermentazione", exact=True).click()
         expect(page.get_by_role("status", name="Esito operazione", exact=True)).to_contain_text(
             "avviata"

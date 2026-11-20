@@ -559,7 +559,6 @@ watch(
         <FermentationControls
           v-if="fermentation.status === 'active'"
           :fermentation="fermentation"
-          :pills="[]"
           :loading="loading"
           @changed="ended"
         />
