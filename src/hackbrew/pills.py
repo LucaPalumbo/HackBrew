@@ -55,6 +55,15 @@ def lock_pill(
     return pill
 
 
+def lock_free_pill(
+    db: Database[dict[str, Any]], identifier: str, session: ClientSession
+) -> dict[str, Any]:
+    pill = lock_pill(db, identifier, session)
+    if db.fermentations.find_one({"pill_id": identifier, "status": "active"}, session=session):
+        raise HTTPException(409, "La pillola è assegnata a una fermentazione attiva.")
+    return pill
+
+
 def pill_snapshots(db: Database[dict[str, Any]]) -> list[dict[str, Any]]:
     latest = {entry["_id"]: entry for entry in db.latest_reading.find()}
     return [
@@ -103,9 +112,7 @@ def rename_pill(identifier: str, payload: PillRename, request: Request) -> dict[
     db = database(request)
 
     def rename(session: ClientSession) -> dict[str, object]:
-        pill = lock_pill(db, identifier, session)
-        if db.fermentations.find_one({"pill_id": identifier, "status": "active"}, session=session):
-            raise HTTPException(409, "La pillola è assegnata a una fermentazione attiva.")
+        pill = lock_free_pill(db, identifier, session)
         db.pills.update_one({"_id": identifier}, {"$set": {"name": payload.name}}, session=session)
         return {"pill": public_pill({**pill, "name": payload.name})}
 
@@ -117,9 +124,7 @@ def remove_pill(identifier: str, request: Request) -> Response:
     db = database(request)
 
     def remove(session: ClientSession) -> None:
-        lock_pill(db, identifier, session)
-        if db.fermentations.find_one({"pill_id": identifier, "status": "active"}, session=session):
-            raise HTTPException(409, "La pillola è assegnata a una fermentazione attiva.")
+        lock_free_pill(db, identifier, session)
         db.pills.update_one({"_id": identifier}, {"$set": {"archived": True}}, session=session)
 
     registry_transaction(db, remove)
