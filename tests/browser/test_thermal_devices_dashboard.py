@@ -16,7 +16,7 @@ def test_register_verify_and_recover_thermal_device(
 ) -> None:
     with thermal_simulator() as simulator:
         page.set_viewport_size({"width": width, "height": height})
-        page.goto(str(api.base_url) + "?page=devices")
+        page.goto(str(api.base_url) + "?page=devices&tab=thermal")
         page.get_by_label("Nome del dispositivo termico", exact=True).fill("Frigo combinato")
         page.get_by_label("Funzioni del dispositivo", exact=True).select_option("both")
         page.get_by_label("Indirizzo HTTP", exact=True).fill("http://thermal-both:8000/")
@@ -52,7 +52,7 @@ def test_register_verify_and_recover_thermal_device(
 def test_invalid_address_unreachable_device_and_duplicate_registration(
     page: Page, api: httpx.Client
 ) -> None:
-    page.goto(str(api.base_url) + "?page=devices")
+    page.goto(str(api.base_url) + "?page=devices&tab=thermal")
     registration = page.get_by_role("region", name="Registrazione dispositivo termico", exact=True)
     expect(page.get_by_text("Nessun dispositivo termico registrato.", exact=True)).to_be_visible()
     page.get_by_label("Nome del dispositivo termico", exact=True).fill("Frigo spento")
@@ -80,7 +80,7 @@ def test_failed_registry_load_does_not_invent_an_empty_list_and_can_retry(
     page: Page, api: httpx.Client
 ) -> None:
     page.route("**/api/thermal-devices", lambda route: route.fulfill(status=503, body="{}"))
-    page.goto(str(api.base_url) + "?page=devices")
+    page.goto(str(api.base_url) + "?page=devices&tab=thermal")
     registry = page.get_by_role("region", name="Dispositivi termici", exact=True)
     expect(registry.get_by_role("alert")).to_contain_text("recuperare i dispositivi termici")
     expect(page.get_by_text("Nessun dispositivo termico registrato.", exact=True)).to_have_count(0)

@@ -40,6 +40,12 @@ class PillRegistration(BaseModel):
     mac: BluetoothMac
 
 
+class PillRename(BaseModel):
+    model_config = ConfigDict(strict=True, str_strip_whitespace=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+
+
 class ThermalSettings(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 

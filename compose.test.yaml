@@ -34,11 +34,13 @@ services:
       THERMAL_SIM_DEVICE_ID: simulator-both
 
   mongo:
+    command: ["mongod", "--replSet", "hackbrew", "--bind_ip_all"]
     image: mongo:8.0@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
     volumes:
+      - ./scripts/mongo-health.js:/opt/hackbrew/mongo-health.js:ro,z
       - test-mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      test: ["CMD", "mongosh", "--quiet", "/opt/hackbrew/mongo-health.js"]
       interval: 2s
       timeout: 5s
       retries: 20
@@ -48,7 +50,7 @@ services:
       context: .
       target: runtime
     environment:
-      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=hackbrew
       MONGODB_DATABASE: hackbrew_test
     networks:
       default:
@@ -75,7 +77,7 @@ services:
     environment:
       HACKBREW_SCREENSHOT_DIR: /artifacts
       HACKBREW_BASE_URL: http://hackbrew-test:8000
-      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=hackbrew
       MONGODB_DATABASE: hackbrew_test
     volumes:
       - ./artifacts:/artifacts:z
@@ -100,7 +102,7 @@ services:
       - ./tests:/workspace/tests:ro,z
     environment:
       HACKBREW_BASE_URL: http://hackbrew-test:8000
-      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=hackbrew
       MONGODB_DATABASE: hackbrew_test
     depends_on:
       app:

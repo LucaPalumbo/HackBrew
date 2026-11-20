@@ -49,6 +49,8 @@ Servono Docker Engine e Docker Compose. Node, Python, MongoDB e i browser di tes
 
 Apri **http://localhost:8080**. Il primo avvio scarica le immagini e costruisce l'applicazione. MongoDB non pubblica una porta sull'host e conserva i dati nel volume del progetto.
 
+MongoDB usa un replica set a nodo singolo per le transazioni che coordinano registro delle pillole e avvio delle fermentazioni. Compose inizializza il set una sola volta e attende che il nodo sia primario prima di avviare l'applicazione. Un volume esistente viene mantenuto durante il passaggio da standalone, seguendo la [conversione prevista da MongoDB](https://www.mongodb.com/docs/manual/tutorial/convert-standalone-to-replica-set/): basta il normale `./scripts/hackbrew up`. Non è necessario eliminare o ricreare i dati. Anche i test usano questa configurazione nel proprio volume isolato.
+
 Per fermare l'applicazione mantenendo le letture:
 
 ```sh
@@ -74,15 +76,25 @@ Il primo comando elimina intenzionalmente il volume MongoDB dichiarato del proge
 
 ## Registrare e controllare le pillole
 
-Apri **Dispositivi** dalla navigazione e inserisci **Nome della pillola** e **MAC Bluetooth**. Sono accettati `AA:BB:CC:DD:EE:FF`, `aa-bb-cc-dd-ee-ff` e `aabbccddeeff`: identificano la stessa pillola e vengono conservati nel formato con due punti maiuscolo. Un MAC già registrato restituisce un conflitto, anche con registrazioni concorrenti.
+Apri **Dispositivi → Pillole → Aggiungi pillola** e inserisci **Nome della pillola** e **MAC Bluetooth**. L'editor compare accanto alle card sul computer e sopra l'elenco sul telefono. Sono accettati `AA:BB:CC:DD:EE:FF`, `aa-bb-cc-dd-ee-ff` e `aabbccddeeff`: identificano la stessa pillola e vengono conservati nel formato con due punti maiuscolo. Un MAC già operativo restituisce un conflitto, anche con registrazioni concorrenti.
 
-Ogni pillola mostra densità SG, temperatura °C, batteria %, velocità della densità in punti SG/giorno e accelerazioni X/Y/Z, con unità degli accelerometri non specificata. La velocità non valida e le misure opzionali assenti sono indicate come non disponibili. Restano distinti acquisizione, prima ricezione della lettura e ultima comunicazione: un invio ripetuto rinnova il contatto senza cambiare la prima ricezione del campione. Le letture si aggiornano senza ricaricare la pagina.
+Le card mostrano disponibilità, ciclo associato, densità SG, temperatura °C, batteria % e ultima comunicazione. Il collegamento della fermentazione apre il suo dettaglio. Su una pillola libera **Esplora letture** apre la diagnostica della sorgente scelta, anche senza ciclo: densità, temperatura e batteria con maggiore dettaglio, velocità della densità in punti SG/giorno e accelerazioni X/Y/Z, con unità degli accelerometri non specificata. La velocità non valida è segnalata mantenendo visibile il valore ricevuto; le misure opzionali assenti restano non disponibili. Restano distinti acquisizione, prima ricezione della lettura e ultima comunicazione: un invio ripetuto rinnova il contatto senza cambiare la prima ricezione del campione. Le letture si aggiornano senza ricaricare la pagina.
+
+**Rinomina** apre l'editor per una pillola libera: il nome si può modificare, il MAC resta in sola lettura. **Rimuovi → Conferma rimozione** esclude la pillola dal registro operativo e dal bridge; **Annulla** o Esc lasciano il registro invariato. I comandi sono disabilitati per le pillole assegnate e durante il salvataggio. Un conflitto o un errore mantiene editor/conferma e dati inseriti, senza una falsa conferma di successo. Le schede Pillole e Dispositivi termici supportano tastiera, ricaricamento e cronologia del browser; `?page=devices&tab=thermal` apre direttamente la scheda termica, `?page=diagnostics&pill=<id>` la diagnostica scelta.
 
 | Operazione | Risultato |
 | --- | --- |
 | `POST /api/pills` con `{"name":"Pillola IPA","mac":"AA:BB:CC:DD:EE:FF"}` | Registra una pillola; HTTP 201 con `pill` e identificatore stabile. |
 | `GET /api/pills` | Elenca `pills`, con identificatore, nome, MAC normalizzato, `available` e `active_fermentation_id`. |
-| `GET /api/readings/latest?pill_id=<id>` | Restituisce l'ultima lettura della pillola richiesta; HTTP 404 per identità sconosciuta. |
+| `PATCH /api/pills/{id}` con `{"name":"Nuovo nome"}` | Rinomina una pillola libera; HTTP 200 con `pill`. Il MAC non è modificabile. |
+| `DELETE /api/pills/{id}` | Rimuove una pillola libera dal registro operativo; HTTP 204. Letture, cicli e identità storiche rimangono conservati. |
+| `GET /api/readings/latest?pill_id=<id>` | Restituisce l'ultima lettura della pillola richiesta; HTTP 404 per identità sconosciuta o rimossa. |
+
+Rinomina e rimozione restituiscono HTTP 409 se la pillola è assegnata a un ciclo attivo, HTTP 404 se assente e HTTP 422 per input non valido. Il controllo avviene anche sul server, nella stessa transazione che coordina il registro con l'avvio del ciclo. Nomi e MAC delle vecchie fermentazioni sono istantanee e non vengono riscritti.
+
+La rimozione è logica. Una nuova registrazione esplicita dello stesso MAC recupera l'identificatore originale con il nome indicato, preservando storico e ultima lettura diagnostica; un MAC già operativo continua a restituire HTTP 409. Un invio di telemetria, anche proveniente da un vecchio elenco del bridge, non registra né ripristina una pillola rimossa.
+
+Screenshot dalla suite browser: [editor desktop](docs/screenshots/pill-editor-desktop.png) e [registro sul telefono](docs/screenshots/pill-registry-mobile.png).
 
 Il [bridge reale aggiornato](https://github.com/LucaPalumbo/RaptPillGateway-ble-http) acquisisce tutte le pillole dal registro HTTP: inserire nome e MAC in questa pagina è sufficiente, senza un secondo elenco manuale sul gateway. Recupera le aggiunte periodicamente (30 secondi predefiniti) e include `pill_mac` in ogni invio. La [guida di integrazione](docs/integrations/rapt-gateway.md) descrive configurazione, protocollo, prove senza hardware e verifica con pillole vere.
 
@@ -94,7 +106,7 @@ Il [bridge reale aggiornato](https://github.com/LucaPalumbo/RaptPillGateway-ble-
 
 ### Dispositivi termici
 
-La pagina **Dispositivi** permette anche di registrare nome, funzioni (**Riscaldamento**, **Raffreddamento** o entrambe) e indirizzo HTTP(S) dei dispositivi termici. L'indirizzo deve essere raggiungibile dal backend, senza credenziali, query o frammenti. **Verifica collegamento** legge lo stato effettivo, capacità e timeout/revisione applicati; un errore mostra **Stato sconosciuto**, conservando separatamente l'ultima conferma precedente. Registrazione e verifica non inviano comandi di accensione.
+La scheda **Dispositivi → Dispositivi termici** permette di registrare nome, funzioni (**Riscaldamento**, **Raffreddamento** o entrambe) e indirizzo HTTP(S) dei dispositivi termici. L'indirizzo deve essere raggiungibile dal backend, senza credenziali, query o frammenti. **Verifica collegamento** legge lo stato effettivo, capacità e timeout/revisione applicati; un errore mostra **Stato sconosciuto**, conservando separatamente l'ultima conferma precedente. Registrazione e verifica non inviano comandi di accensione.
 
 `GET/POST /api/thermal-devices` elencano e registrano i dispositivi; `POST /api/thermal-devices/{id}/check` ne verifica il collegamento. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout globale parte da tre ore ed è configurabile nella pagina **Impostazioni**. La [regolazione termica](docs/integrations/thermal-regulation.md) è disponibile alla creazione della fermentazione.
 
@@ -260,6 +272,8 @@ Con risposte lente, gli aggiornamenti automatici di card e dettaglio attendono i
 
 Ogni connessione SSE legge MongoDB all'apertura e controlla le variazioni ogni secondo. Non usa notifiche in memoria come archivio. Gli eventi `reading` contengono lo stesso snapshot di `GET /api/readings/latest`, inclusi fermentazione e relativa lettura, soglia e `server_time` (secondi Unix). Il metadato `fermentation_reading_count`, ricavato dai campioni persistiti dell'attiva, permette di notificare anche una lettura precedente all'ultima: la tabella e i grafici si aggiornano mentre i valori correnti restano corretti. I duplicati non aumentano il conteggio. Il browser usa il riferimento del server e il tempo trascorso per aggiornare lo stato anche senza nuovi eventi. Alla riconnessione viene sempre inviato lo stato persistito corrente, anche con `Last-Event-ID`: non è uno stream dello storico. Se MongoDB diventa irraggiungibile, lo stream invia `unavailable` e si chiude per consentire un nuovo tentativo; le connessioni inattive ricevono commenti di mantenimento.
 
+Lo snapshot include anche `registry_revision`: le modifiche persistite al registro e gli avvii/termini dei cicli fanno riconciliare il browser anche quando avvengono fra due controlli live e il contenuto finale torna uguale al precedente. Una risposta HTTP intermedia non può così lasciare una pillola indicata come occupata dopo il termine. Il contratto del bridge conserva la propria revisione opaca basata sul contenuto operativo.
+
 ## Indisponibilità e ripresa
 
 Quando MongoDB non è disponibile, letture, avvio e termine restituiscono HTTP 503 con una spiegazione. Un invio non salvato non viene confermato come riuscito e lo stream non invia una lettura inventata. La dashboard conserva gli eventuali valori già caricati con il loro vero istante di acquisizione; l'età continua a essere valutata senza trasformare un caricamento fallito in una nuova misura. Se non ha ancora ricevuto uno stato valido, indica che il monitoraggio non è disponibile e attende i dati prima di proporre l'avvio di una fermentazione.
@@ -327,6 +341,8 @@ Per un solo file o un singolo caso:
 ./scripts/hackbrew test tests/browser/test_delivery_dashboard.py
 ./scripts/hackbrew test tests/integration/test_pills.py
 ./scripts/hackbrew test tests/browser/test_pills_dashboard.py
+./scripts/hackbrew test tests/integration/test_pill_management.py tests/browser/test_pill_management_dashboard.py
+./scripts/hackbrew test-registry-upgrade
 ./scripts/hackbrew test tests/integration/test_parallel_fermentations.py
 ./scripts/hackbrew test tests/browser/test_parallel_dashboard.py
 ./scripts/hackbrew test tests/integration/test_bridge.py tests/browser/test_bridge_dashboard.py
@@ -344,17 +360,19 @@ La suite invia messaggi HTTP all'applicazione reale, usa MongoDB reale e verific
 
 Le prove del bridge avviano il vero eseguibile del gateway con input BLE deterministici, attraverso lo stesso ricevitore e parser usato con l'adattatore. Verificano HTTP reale, sincronizzazione automatica, due pillole visibili nel browser, duplicati separati, accelerazioni con segno, qualità della velocità e consegne fallite senza retry. Il gateway non diventa un servizio applicativo obbligatorio.
 
-**La repository del gateway è privata.** Prima di `test`, `test-recovery` o `check`, scegli una delle modalità: usa una checkout a cui hai accesso con `export HACKBREW_GATEWAY_SOURCE=/percorso/assoluto/RaptPillGateway-ble-http` (per riprodurre la consegna, commit `de4cd6395b67b97f154fe0ed6f5cd8fa82a35e90`), oppure esporta `HACKBREW_GATEWAY_TOKEN` con una credenziale GitHub autorizzata alla lettura della repository. Con GitHub CLI già autenticata puoi usare `export HACKBREW_GATEWAY_TOKEN="$(gh auth token)"`. Questa seconda modalità scarica il commit fissato in Compose e passa il token solo come secret di build, senza salvarlo nell'immagine o nella configurazione dei servizi. Non inserire credenziali negli URL. `up`, `dev`, build applicativa, lint e typecheck non richiedono il gateway. La [guida](docs/integrations/rapt-gateway.md) dettaglia entrambe le opzioni.
+**La repository del gateway è privata.** Prima di `test`, `test-recovery`, `test-registry-upgrade` o `check`, scegli una delle modalità: usa una checkout a cui hai accesso con `export HACKBREW_GATEWAY_SOURCE=/percorso/assoluto/RaptPillGateway-ble-http` (per riprodurre la consegna, commit `de4cd6395b67b97f154fe0ed6f5cd8fa82a35e90`), oppure esporta `HACKBREW_GATEWAY_TOKEN` con una credenziale GitHub autorizzata alla lettura della repository. Con GitHub CLI già autenticata puoi usare `export HACKBREW_GATEWAY_TOKEN="$(gh auth token)"`. Questa seconda modalità scarica il commit fissato in Compose e passa il token solo come secret di build, senza salvarlo nell'immagine o nella configurazione dei servizi. Non inserire credenziali negli URL. `up`, `dev`, build applicativa, lint e typecheck non richiedono il gateway. La [guida](docs/integrations/rapt-gateway.md) dettaglia entrambe le opzioni.
+
+Il controllo `./scripts/hackbrew test-registry-upgrade`, incluso anche in `test` senza argomenti e `check`, prepara un database standalone con record del formato precedente, lo converte a replica set sullo stesso volume, applica rinomina/rimozione e crea un ciclo con le nuove transazioni. Ricrea poi i container mantenendo il volume e verifica attraverso HTTP identità, storico, diagnostica, bridge e recupero esplicito di un MAC rimosso. La preparazione del solo formato precedente avviene nel database di test; le asserzioni osservano esclusivamente le API. La prova usa un progetto Compose temporaneo dedicato e rimuove solo il proprio volume.
 
 Il controllo completo conserva fuori dall'applicazione snapshot JSON e riavvia realmente l'applicazione sullo stesso volume di test in due scenari. Il primo prepara il vincolo globale della #9 e verifica la sua sostituzione con quello per pillola, senza perdere registrazioni, ciclo o letture. Il secondo salva due fermentazioni attive e una conclusa, verificando dopo il riavvio assegnazioni, misure, deduplicazione concorrente, storico browser e vincoli di riuso per pillola. Tutte le asserzioni osservano API e browser; la preparazione degli indici precedenti è confinata al solo database di test.
 
-La stessa prova di riavvio conserva il timeout globale modificato e una configurazione termica ancora in attesa: il recupero conferma lo stesso comando persistito, senza comandi di modo, con identica durata su tutti e tre i simulatori. La prova di guasto reale a MongoDB include lettura e modifica delle impostazioni, che devono restituire HTTP 503.
+La stessa prova di riavvio conserva il timeout globale modificato e una configurazione termica ancora in attesa: il recupero conferma lo stesso comando persistito, senza comandi di modo, con identica durata su tutti e tre i simulatori. La prova di guasto reale a MongoDB include lettura e modifica delle impostazioni, elenchi del registro/bridge e modifiche/rimozioni delle pillole, che devono restituire HTTP 503.
 
 Il controllo completo esegue inoltre le prove operative disponibili separatamente con `./scripts/hackbrew test-recovery`. Oltre ai recuperi dei singoli comportamenti, lo scenario completo mantiene due fermentazioni regolate e una in solo monitoraggio, un vero bridge con input BLE deterministici e due browser aperti su intervalli storici fissi. Interrompe rete, MongoDB e server, ricrea i container sullo stesso volume e verifica indipendenza, isteresi, cronologia, revisioni del timeout, OFF pendenti e conclusioni definitive. I messaggi rifiutati durante i guasti non vengono ritrasmessi. `./scripts/hackbrew test-recovery assembled` esegue soltanto questo scenario; `./scripts/hackbrew test tests/browser/test_assembled_monitoring.py` verifica le riconnessioni di rete su desktop e telefono.
 
 La [guida alla verifica e dimostrazione](docs/operations/verification-and-demo.md) descrive le fasi automatiche, le schermate `ripresa-integrata-{prima,guasto,recupero}-{1440,390}.png` e un percorso dal primo avvio in un progetto Docker separato fino a registrazione, bridge, grafico, impostazioni, termine e recupero. Distingue i risultati software dalle future prove con hardware reale.
 
-La procedura usa soltanto un progetto `hackbrew-tests-*` e il suo volume isolato. Un coordinatore esterno interrompe e ripristina i servizi mentre il browser rimane aperto nel container dei test; il container applicativo non espone controlli speciali per i test. Non servono credenziali applicative, hardware o dati di produzione; per la sorgente privata del bridge valgono le modalità di accesso descritte sopra. `./scripts/hackbrew test <file o argomenti pytest>` esegue soltanto i casi selezionati, mentre `test` senza argomenti e `check` includono anche riavvio e prova di indisponibilità.
+La procedura usa soltanto progetti `hackbrew-tests-*` e i rispettivi volumi isolati. Un coordinatore esterno interrompe e ripristina i servizi mentre il browser rimane aperto nel container dei test; il container applicativo non espone controlli speciali per i test. Non servono credenziali applicative, hardware o dati di produzione; per la sorgente privata del bridge valgono le modalità di accesso descritte sopra. `./scripts/hackbrew test <file o argomenti pytest>` esegue soltanto i casi selezionati, mentre `test` senza argomenti e `check` includono anche riavvio e prova di indisponibilità.
 
 Ogni esecuzione crea un progetto Compose distinto con database e volume di test isolati. La pulizia tra i casi rimuove i documenti mantenendo gli indici dell'applicazione; al termine vengono rimossi soltanto i container e il volume di quella esecuzione. I test non richiedono una pillola, un gateway fisico o l'accesso al volume dell'applicazione. Le prove usano il codice reale del gateway privato: la modalità checkout locale non richiede credenziali durante il build.
 

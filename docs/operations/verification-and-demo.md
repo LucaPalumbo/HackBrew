@@ -8,7 +8,10 @@ Dalla checkout di HackBrew, configura l'accesso alla sorgente del bridge come ne
 # Suite completa: controlli statici, HTTP/browser, upgrade e tutte le prove operative.
 ./scripts/hackbrew check
 
-# Tutte le prove operative, senza rieseguire pytest.
+# Conversione standalone e persistenza della gestione del registro.
+./scripts/hackbrew test-registry-upgrade
+
+# Tutte le prove di guasto e recupero, senza rieseguire pytest.
 ./scripts/hackbrew test-recovery
 
 # Solo il nuovo scenario continuo con bridge e più fermentazioni.
@@ -55,9 +58,9 @@ export HACKBREW_SIMULATOR_PORT=8091
 
 Apri **http://localhost:8090**. Il progetto dimostrativo ha rete e volume propri; i normali riavvii li conservano. Il primo build richiede il download delle immagini. Non è necessario cancellare un volume per ogni avvio.
 
-1. In **Dispositivi**, registra le pillole con i MAC Bluetooth reali. Per il replay senza hardware usa `AA:BB:CC:DD:EE:FF` e `11:22:33:44:55:66`.
-2. Per una dimostrazione con attuatore simulato avvia `HACKBREW_SIMULATOR_CAPABILITY=both ./scripts/hackbrew simulator`. Registra un dispositivo con entrambe le funzioni e indirizzo **`http://thermal-simulator:8000`**, poi usa **Verifica collegamento**. Il simulatore è opzionale e appartiene a questa dimostrazione; non è un servizio applicativo obbligatorio.
-3. In **Nuova fermentazione**, avvia un ciclo scegliendo pillola e nome. **Solo monitoraggio** non chiede soglie o attuatori. Per l'altro ciclo scegli **Dispositivo combinato**, il simulatore e una fascia come 20–23 °C con isteresi 1 °C. Lo stesso dispositivo non è riutilizzabile finché rimane riservato.
+1. In **Dispositivi → Pillole → Aggiungi pillola**, registra le pillole con i MAC Bluetooth reali. Per il replay senza hardware usa `AA:BB:CC:DD:EE:FF` e `11:22:33:44:55:66`. Su una pillola libera **Esplora letture** apre la diagnostica completa della sorgente scelta.
+2. Per una dimostrazione con attuatore simulato avvia `HACKBREW_SIMULATOR_CAPABILITY=both ./scripts/hackbrew simulator`. Nella scheda **Dispositivi termici** registra un dispositivo con entrambe le funzioni e indirizzo **`http://thermal-simulator:8000`**, poi usa **Verifica collegamento**. Il simulatore è opzionale e appartiene a questa dimostrazione; non è un servizio applicativo obbligatorio.
+3. In **Nuova fermentazione**, scegli nome e pillola, passa a Regolazione e conferma dal Riepilogo. **Solo monitoraggio** non chiede soglie o attuatori. Per l'altro ciclo scegli **Dispositivo combinato**, il simulatore e una fascia come 20–23 °C con isteresi 1 °C. Lo stesso dispositivo non è riutilizzabile finché rimane riservato.
 4. Configura un'unica istanza del [bridge](../integrations/rapt-gateway.md) con gli URL raggiungibili del server:
 
    ```yaml
@@ -75,6 +78,7 @@ Apri **http://localhost:8090**. Il progetto dimostrativo ha rete e volume propri
 6. Nella scheda **Gestione** del dettaglio regolato modifica insieme minimo, massimo e isteresi. Controlla i valori salvati, la revisione e la cronologia iniziale/modificata. Lo stato di regolazione distingue richiesta e conferma fisica. In **Impostazioni**, modifica il timeout comune e controlla le conferme dei dispositivi; per una demo manuale scegli una durata sufficiente a completare le operazioni.
 7. Interrompi e ripristina la rete del browser lasciando aperto il dettaglio. Le vecchie letture devono conservare i propri istanti e l'intervallo scelto. Dopo nuove acquisizioni il live riprende senza cambiare fermentazione. Per riprodurre anche i guasti ai servizi usa `test-recovery assembled`, che opera su un ambiente separato invece di fermare questo progetto manuale.
 8. Nella scheda **Gestione** premi **Termina fermentazione** e poi **Conferma termine**. Il ciclo rimane concluso dopo reload o riavvio; lo spegnimento non confermato rimane visibile e trattiene la prenotazione. Non viene riaperto dall'arrivo di nuove letture.
+9. Torna a **Dispositivi → Pillole** e rinomina la pillola libera: il MAC resta in sola lettura. Prova **Rimuovi → Annulla**, poi conferma una rimozione. La pillola scompare dal registro operativo e dal bridge; il ciclo concluso resta consultabile in Archivio con nome e MAC storici. Una successiva registrazione esplicita dello stesso MAC recupera la stessa identità.
 
 Per arrestare la dimostrazione, nella stessa shell usa `./scripts/hackbrew down`; il volume viene conservato. Le variabili esportate valgono per questa shell: una nuova shell senza queste variabili torna al progetto e alle porte abituali.
 

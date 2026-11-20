@@ -28,10 +28,10 @@ def test_latest_lettura_is_visible_and_refreshable_on_desktop_and_phone(
         page.get_by_role("region", name="Densità").get_by_text("1.050", exact=True)
     ).to_be_visible()
     expect(
-        page.get_by_role("region", name="Temperatura").get_by_text("19,7", exact=True)
+        page.get_by_role("region", name="Temperatura").get_by_text("19,6875", exact=True)
     ).to_be_visible()
     expect(
-        page.get_by_role("region", name="Batteria").get_by_text("63", exact=True)
+        page.get_by_role("region", name="Batteria").get_by_text("63,273438", exact=True)
     ).to_be_visible()
     expect(page.get_by_label("Acquisizione della lettura")).to_have_attribute(
         "datetime", "2023-11-14T22:13:20.123Z"

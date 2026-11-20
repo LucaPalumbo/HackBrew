@@ -71,3 +71,13 @@ def arrange_heating_v16(identifier: str, heater_identifier: str) -> None:
                 },
             ],
         )
+
+
+def arrange_registry_before_management(cycles: list[dict[str, Any]]) -> None:
+    """Arrange existing monitor-only cycles and pill records from before management."""
+    with isolated_database() as db:
+        db.pills.update_many(
+            {"_id": {"$in": [cycle["pill_id"] for cycle in cycles]}},
+            {"$unset": {"archived": "", "registry_revision": ""}},
+        )
+        db.fermentations.insert_many(cycles)

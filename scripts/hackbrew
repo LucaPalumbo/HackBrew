@@ -41,7 +41,10 @@ case "$action" in
         docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" backend-tools mypy
         docker compose -f compose.yaml run --rm --build --user "$(id -u):$(id -g)" frontend npm run typecheck
         ;;
-    test|test-recovery)
+    test|test-recovery|test-registry-upgrade)
+        if [ "$action" = test-registry-upgrade ] && [ "$#" -ne 0 ]; then
+            printf '%s\n' 'Usage: ./scripts/hackbrew test-registry-upgrade'; exit 2
+        fi
         if [ "$action" = test-recovery ]; then
             case "$*" in
                 ''|assembled) ;;
@@ -61,11 +64,16 @@ case "$action" in
         else
             docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml build app tests thermal-heating thermal-heating-secondary thermal-cooling thermal-both
         fi
+        if [ "$action" = test-registry-upgrade ]; then
+            "$project_root/scripts/check-registry-upgrade" "$hackbrew_tests_project"
+            exit 0
+        fi
         docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml up --detach --wait app
         if [ "$action" = test ]; then
             docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm tests pytest "$@"
         fi
         if [ "$action" = test ] && [ "$#" -eq 0 ]; then
+            "$project_root/scripts/check-registry-upgrade" "$hackbrew_tests_project"
             for hackbrew_restart_phase in upgrade persistence; do
                 hackbrew_restart_state=$(docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml run --rm -T tests python -m tests.check_restart "$hackbrew_restart_phase-seed")
                 docker compose --project-name "$hackbrew_tests_project" -f compose.test.yaml restart app
@@ -84,7 +92,7 @@ case "$action" in
         "$0" test
         ;;
     help)
-        printf '%s\n' 'Usage: ./scripts/hackbrew {up|down|build|dev|simulator|lint|format|format-check|typecheck|test [pytest arguments]|test-recovery [assembled]|check}'
+        printf '%s\n' 'Usage: ./scripts/hackbrew {up|down|build|dev|simulator|lint|format|format-check|typecheck|test [pytest arguments]|test-recovery [assembled]|test-registry-upgrade|check}'
         ;;
     *)
         printf '%s\n' "Unknown command: $action" >&2

@@ -3,12 +3,14 @@
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from pymongo import ReturnDocument
+from pymongo.client_session import ClientSession
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from hackbrew.models import PillRegistration
-from hackbrew.storage import database
+from hackbrew.models import PillRegistration, PillRename
+from hackbrew.storage import database, registry_transaction
 
 router = APIRouter(prefix="/api/pills")
 
@@ -33,12 +35,21 @@ def registered_pills(db: Database[dict[str, Any]]) -> list[dict[str, Any]]:
     }
     return [
         public_pill(pill, assignments.get(pill["_id"]))
-        for pill in db.pills.find().sort([("name", 1), ("_id", 1)])
+        for pill in db.pills.find({"archived": {"$ne": True}}).sort([("name", 1), ("_id", 1)])
     ]
 
 
-def require_pill(db: Database[dict[str, Any]], identifier: str) -> dict[str, Any]:
-    pill = db.pills.find_one({"_id": identifier})
+def lock_pill(
+    db: Database[dict[str, Any]], identifier: str, session: ClientSession
+) -> dict[str, Any]:
+    # A shared document write serializes lifecycle changes with cycle creation.
+    # A transaction containing only availability reads would allow write skew.
+    pill = db.pills.find_one_and_update(
+        {"_id": identifier, "archived": {"$ne": True}},
+        {"$inc": {"registry_revision": 1}},
+        return_document=ReturnDocument.AFTER,
+        session=session,
+    )
     if pill is None:
         raise HTTPException(404, "Pillola non trovata.")
     return pill
@@ -63,9 +74,53 @@ def list_pills(request: Request) -> dict[str, object]:
 
 @router.post("", status_code=201)
 def register_pill(payload: PillRegistration, request: Request) -> dict[str, object]:
-    document = {"_id": str(uuid4()), "name": payload.name, "mac": payload.mac}
+    db = database(request)
+    document = {
+        "_id": str(uuid4()),
+        "name": payload.name,
+        "mac": payload.mac,
+        "registry_revision": 1,
+    }
     try:
-        database(request).pills.insert_one(document)
+        db.pills.insert_one(document)
     except DuplicateKeyError:
-        raise HTTPException(409, "Questo MAC Bluetooth è già registrato.") from None
+        restored = db.pills.find_one_and_update(
+            {"mac": payload.mac, "archived": True},
+            {
+                "$set": {"name": payload.name, "archived": False},
+                "$inc": {"registry_revision": 1},
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if restored is None:
+            raise HTTPException(409, "Questo MAC Bluetooth è già registrato.") from None
+        document = restored
     return {"pill": public_pill(document)}
+
+
+@router.patch("/{identifier}")
+def rename_pill(identifier: str, payload: PillRename, request: Request) -> dict[str, object]:
+    db = database(request)
+
+    def rename(session: ClientSession) -> dict[str, object]:
+        pill = lock_pill(db, identifier, session)
+        if db.fermentations.find_one({"pill_id": identifier, "status": "active"}, session=session):
+            raise HTTPException(409, "La pillola è assegnata a una fermentazione attiva.")
+        db.pills.update_one({"_id": identifier}, {"$set": {"name": payload.name}}, session=session)
+        return {"pill": public_pill({**pill, "name": payload.name})}
+
+    return registry_transaction(db, rename)
+
+
+@router.delete("/{identifier}", status_code=204)
+def remove_pill(identifier: str, request: Request) -> Response:
+    db = database(request)
+
+    def remove(session: ClientSession) -> None:
+        lock_pill(db, identifier, session)
+        if db.fermentations.find_one({"pill_id": identifier, "status": "active"}, session=session):
+            raise HTTPException(409, "La pillola è assegnata a una fermentazione attiva.")
+        db.pills.update_one({"_id": identifier}, {"$set": {"archived": True}}, session=session)
+
+    registry_transaction(db, remove)
+    return Response(status_code=204)

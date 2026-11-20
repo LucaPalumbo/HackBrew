@@ -1,0 +1,7 @@
+services:
+  app:
+    image: ${HACKBREW_REGISTRY_UPGRADE_APP_IMAGE:?Run scripts/hackbrew test-registry-upgrade}
+    pull_policy: never
+  tests:
+    image: ${HACKBREW_REGISTRY_UPGRADE_TEST_IMAGE:?Run scripts/hackbrew test-registry-upgrade}
+    pull_policy: never

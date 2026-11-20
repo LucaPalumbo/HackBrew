@@ -8,7 +8,7 @@ import ThermalDeviceRegistry from './ThermalDeviceRegistry.vue'
 import SettingsPage from './SettingsPage.vue'
 import HomePage from './HomePage.vue'
 import NavigationIcon from './NavigationIcon.vue'
-import ReadingSummary from './ReadingSummary.vue'
+import PillDiagnostics from './PillDiagnostics.vue'
 import { pillCommunication, type CommunicationClock } from './communication'
 import type {
   Fermentation,
@@ -52,6 +52,36 @@ function requestedPage(): Page {
   return Object.hasOwn(pageNames, candidate) ? (candidate as Page) : 'home'
 }
 const page = ref<Page>(requestedPage())
+type DeviceTab = 'pills' | 'thermal'
+function requestedDeviceTab(): DeviceTab {
+  return new URLSearchParams(window.location.search).get('tab') === 'thermal'
+    ? 'thermal'
+    : 'pills'
+}
+const deviceTab = ref<DeviceTab>(requestedDeviceTab())
+function selectDeviceTab(tab: DeviceTab) {
+  if (tab === deviceTab.value) return
+  const url = new URL(window.location.href)
+  if (tab === 'thermal') url.searchParams.set('tab', tab)
+  else url.searchParams.delete('tab')
+  window.history.pushState(null, '', url)
+  restoreSelection()
+}
+function deviceTabKey(event: KeyboardEvent, index: number) {
+  const target =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? 1
+        : ['ArrowLeft', 'ArrowRight'].includes(event.key)
+          ? 1 - index
+          : null
+  if (target === null) return
+  event.preventDefault()
+  const tab = target === 0 ? 'pills' : 'thermal'
+  selectDeviceTab(tab)
+  void nextTick(() => document.getElementById(`device-tab-${tab}`)?.focus())
+}
 function requestedTab(): FermentationTab {
   return new URLSearchParams(window.location.search).get('tab') === 'management'
     ? 'management'
@@ -76,6 +106,8 @@ const activeNavigation = computed(() =>
       : page.value,
 )
 function destination(target: Page, identifier?: string) {
+  if (target === 'diagnostics' && identifier)
+    return `/?page=diagnostics&pill=${encodeURIComponent(identifier)}`
   if (identifier) return `/?fermentation=${encodeURIComponent(identifier)}`
   return target === 'home' ? '/' : `/?page=${target}`
 }
@@ -109,7 +141,12 @@ function historyChanged() {
   void loadLatest()
 }
 const pills = ref<PillSnapshot[]>([])
-const diagnosticPillId = ref('')
+const diagnosticPillId = ref(
+  new URLSearchParams(window.location.search).get('pill') ?? '',
+)
+function selectDiagnostic(identifier: string) {
+  navigate('diagnostics', identifier)
+}
 const diagnosticReading = computed(
   () =>
     pills.value.find((pill) => pill.id === diagnosticPillId.value)?.reading ??
@@ -124,6 +161,9 @@ function selectFermentation(identifier: string | null) {
 }
 function restoreSelection() {
   page.value = requestedPage()
+  deviceTab.value = requestedDeviceTab()
+  const diagnostic = new URLSearchParams(window.location.search).get('pill')
+  if (diagnostic !== null) diagnosticPillId.value = diagnostic
   detailTab.value = requestedTab()
   selectedId.value =
     new URLSearchParams(window.location.search).get('fermentation') || null
@@ -131,6 +171,12 @@ function restoreSelection() {
 const reading = diagnosticReading
 const isLoading = ref(false)
 const hasSnapshot = ref(false)
+const diagnosticMissing = computed(
+  () =>
+    hasSnapshot.value &&
+    !!diagnosticPillId.value &&
+    !pills.value.some((pill) => pill.id === diagnosticPillId.value),
+)
 const error = ref('')
 const connection = ref<'connecting' | 'live' | 'reconnecting'>('connecting')
 const connectionStatus = computed(() => {
@@ -198,7 +244,10 @@ function applySnapshot(snapshot: Snapshot) {
   hasSnapshot.value = true
   historyRevision.value += 1
   pills.value = snapshot.pills
-  if (!pills.value.some((pill) => pill.id === diagnosticPillId.value))
+  const requested = new URLSearchParams(window.location.search).get('pill')
+  if (page.value === 'diagnostics' && requested !== null)
+    diagnosticPillId.value = requested
+  else if (!pills.value.some((pill) => pill.id === diagnosticPillId.value))
     diagnosticPillId.value = snapshot.pill_id ?? ''
   activeFermentations.value = snapshot.active_fermentations
   communicationTimeout.value = snapshot.communication_timeout_seconds
@@ -332,18 +381,67 @@ onUnmounted(() => {
             :revision="historyRevision"
             @select="selectFermentation"
         /></template>
-        <template v-else-if="page === 'devices'"
-          ><PillRegistry
-            :pills="pills"
-            :loading="isLoading"
-            :error="error"
-            @changed="loadLatest" /><a
-            class="section-link"
-            href="/?page=diagnostics"
-            @click="follow($event, 'diagnostics')"
-            >Diagnostica delle pillole →</a
-          ><ThermalDeviceRegistry
-        /></template>
+        <template v-else-if="page === 'devices'">
+          <div class="page-heading">
+            <p class="eyebrow">Il tuo equipaggiamento</p>
+            <h1>Dispositivi</h1>
+            <p class="description">
+              Pillole e controllo termico, ciascuno al proprio posto.
+            </p>
+          </div>
+          <div
+            class="device-tabs"
+            role="tablist"
+            aria-label="Tipo di dispositivo"
+          >
+            <button
+              v-for="(tab, index) in ['pills', 'thermal'] as const"
+              :id="`device-tab-${tab}`"
+              :key="tab"
+              type="button"
+              role="tab"
+              :aria-selected="deviceTab === tab"
+              :aria-controls="`device-panel-${tab}`"
+              :tabindex="deviceTab === tab ? 0 : -1"
+              @click="selectDeviceTab(tab)"
+              @keydown="deviceTabKey($event, index)"
+            >
+              {{ tab === 'pills' ? 'Pillole' : 'Dispositivi termici' }}
+            </button>
+          </div>
+          <div
+            v-show="deviceTab === 'pills'"
+            id="device-panel-pills"
+            role="tabpanel"
+            aria-labelledby="device-tab-pills"
+          >
+            <PillRegistry
+              :pills="pills"
+              :ready="hasSnapshot"
+              :active="activeFermentations"
+              :clock="communicationClock"
+              :connected="connection === 'live'"
+              :loading="isLoading"
+              :error="error"
+              @diagnostic="selectDiagnostic"
+              @select="selectFermentation"
+              @changed="loadLatest"
+            /><a
+              class="section-link"
+              href="/?page=diagnostics"
+              @click="follow($event, 'diagnostics')"
+              >Diagnostica delle pillole →</a
+            >
+          </div>
+          <div
+            v-show="deviceTab === 'thermal'"
+            id="device-panel-thermal"
+            role="tabpanel"
+            aria-labelledby="device-tab-thermal"
+          >
+            <ThermalDeviceRegistry />
+          </div>
+        </template>
         <SettingsPage v-else-if="page === 'settings'" />
         <template v-else-if="page === 'new'"
           ><div class="page-heading">
@@ -411,7 +509,18 @@ onUnmounted(() => {
           </button>
           <div v-if="pills.length" class="diagnostic-selection">
             <label for="diagnostic-pill">Pillola diagnostica</label
-            ><select id="diagnostic-pill" v-model="diagnosticPillId">
+            ><select
+              id="diagnostic-pill"
+              v-model="diagnosticPillId"
+              @change="selectDiagnostic(diagnosticPillId)"
+            >
+              <option
+                v-if="diagnosticMissing"
+                :value="diagnosticPillId"
+                disabled
+              >
+                Pillola non disponibile
+              </option>
               <option v-for="pill in pills" :key="pill.id" :value="pill.id">
                 {{ pill.name }} · {{ pill.mac }}
               </option>
@@ -428,7 +537,20 @@ onUnmounted(() => {
             {{ dataStatus }}
           </p>
           <p v-if="error" class="error" role="alert">{{ error }}</p>
-          <ReadingSummary v-if="reading" :reading="reading" />
+          <section v-if="diagnosticMissing" class="empty">
+            <h2>Pillola non disponibile</h2>
+            <p>
+              La pillola richiesta non è presente nel registro operativo. Le sue
+              fermentazioni restano consultabili nell’Archivio.
+            </p>
+            <a href="/?page=devices" @click="follow($event, 'devices')"
+              >Gestisci dispositivi</a
+            >
+          </section>
+          <PillDiagnostics
+            v-else-if="reading"
+            :pill="pills.find((pill) => pill.id === diagnosticPillId)!"
+          />
           <section v-else-if="hasSnapshot && !error" class="empty">
             <h2>In attesa della prima lettura</h2>
             <p>
