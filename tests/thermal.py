@@ -1,6 +1,7 @@
 """HTTP clients for the simulator's external protocol and simulation controls."""
 
 import json
+import queue
 import socket
 import threading
 from collections.abc import Iterator
@@ -10,6 +11,44 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+
+
+@contextmanager
+def held_state_actuator(
+    simulator: httpx.Client,
+) -> Iterator[tuple[str, queue.Queue[None], threading.Event]]:
+    """Hold real HTTP state replies until a registry change has completed."""
+    entered: queue.Queue[None] = queue.Queue()
+    release = threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            snapshot = simulator.get("/api/v1/state").content
+            entered.put(None)
+            release.wait(timeout=8)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(snapshot)))
+            self.end_headers()
+            self.wfile.write(snapshot)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield (
+            f"http://{socket.gethostbyname(socket.gethostname())}:{server.server_port}",
+            entered,
+            release,
+        )
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 @contextmanager

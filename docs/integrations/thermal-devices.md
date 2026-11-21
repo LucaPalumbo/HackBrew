@@ -4,12 +4,14 @@ Le #14 e #15 introducono registro, osservazioni e timeout globale. Le #16 e #17 
 
 ## Registrazione e verifica nell'applicazione
 
-Nella pagina **Dispositivi**, sotto le pillole, inserire nome, funzioni e indirizzo HTTP(S) raggiungibile dal **server**. Sono supportati riscaldamento, raffreddamento e entrambe le funzioni. Nome non vuoto (massimo 200 caratteri), capacità riconosciuta e URL valido sono obbligatori. L'URL può contenere un percorso base, ma non credenziali, query o frammenti. Host, porta predefinita e slash finale sono normalizzati; un indirizzo equivalente già registrato produce HTTP 409, anche con richieste concorrenti.
+Nella scheda **Dispositivi → Dispositivi termici**, premere **Aggiungi dispositivo termico** e inserire nome, funzioni e indirizzo HTTP(S) raggiungibile dal **server**. Sono supportati riscaldamento, raffreddamento e entrambe le funzioni. Nome non vuoto (massimo 200 caratteri), capacità riconosciuta e URL valido sono obbligatori. L'URL può contenere un percorso base, ma non credenziali, query o frammenti. Host, porta predefinita e slash finale sono normalizzati; un indirizzo equivalente già registrato produce HTTP 409, anche con richieste concorrenti.
 
 | API HackBrew | Risultato |
 | --- | --- |
 | `GET /api/thermal-devices` | `devices`: registro persistito con identificatori stabili e ultima osservazione. |
 | `POST /api/thermal-devices` | `{"name":"Frigo","capability":"both","base_url":"http://frigo.local:8000"}`; HTTP 201 con `device`. Capacità: `heating`, `cooling`, `both`. |
+| `PATCH /api/thermal-devices/{id}` | Nome e/o `base_url` di un dispositivo libero; HTTP 200 con `device`. Le capacità non sono modificabili. |
+| `DELETE /api/thermal-devices/{id}` | Archivia un dispositivo libero, senza cancellare istantanee e cicli; HTTP 204. |
 | `POST /api/thermal-devices/{id}/check` | Esegue soltanto GET dello stato del dispositivo. Restituisce `device` con risultato della verifica, anche se la comunicazione fallisce. Non invia comandi e non rinnova il timeout. |
 
 Il registro distingue `verification_status`: `unverified`, `confirmed`, `pending`, `error`. Prima della verifica `actual_mode` è `null`. Una risposta valida espone capacità riportata, modo richiesto/effettivo, `application_status`, istante della conferma fisica e timeout/revisione applicati. Una semplice accettazione del comando non è una conferma fisica.
@@ -17,6 +19,8 @@ Il registro distingue `verification_status`: `unverified`, `confirmed`, `pending
 In caso di HTTP fallito, risposta malformata, capacità incompatibili o timeout di trasporto (due secondi), `actual_mode` e i campi di conferma corrente sono `null`; il dispositivo è sconosciuto/in errore, non spento confermato. `last_confirmation` conserva separatamente l'ultima osservazione fisica precedente con il suo vero orario. La pagina segnala anche i comandi in attesa di conferma e lo spegnimento autonomo. Le osservazioni mostrate sono riferite all'ultima verifica, non una garanzia di stato radio o hardware in tempo reale; **Verifica collegamento** esegue una nuova interrogazione e **Aggiorna dispositivi termici** rilegge il registro.
 
 Una verifica HTTP più vecchia e lenta non può sovrascrivere una verifica iniziata successivamente. Le revisioni delle verifiche sono persistite e aggiornate atomicamente. HTTP 404 indica un identificatore sconosciuto, HTTP 422 input non valido. Se MongoDB è indisponibile, le API rispondono HTTP 503 senza confermare una registrazione o un risultato non salvato.
+
+Rinomina, cambio indirizzo e rimozione richiedono un dispositivo libero, senza riserve o OFF pendenti: altrimenti il server risponde HTTP 409, anche in presenza di un avvio concorrente. Un indirizzo duplicato produce HTTP 409 senza salvare altre modifiche della richiesta. Cambiare indirizzo mantiene l'identità ma azzera le conferme e la sincronizzazione del collegamento precedente; verifiche e sincronizzazioni in corso non possono ripubblicarle. Una forma equivalente dello stesso URL conserva invece la verifica. Dopo una rimozione confermata l'indirizzo è riutilizzabile con una nuova identità, mantenendo le associazioni storiche di nome, capacità e indirizzo. L'aggiornamento del precedente indice e dei record avviene automaticamente all'avvio sullo stesso volume.
 
 L'adattatore sostituibile è `src/hackbrew/thermal_client.py`: racchiude GET/PUT, percorsi, timeout di trasporto e validazione del protocollo. L'applicazione legge lo stato, sincronizza il timeout e usa i comandi assoluti per la regolazione termica. Il pulsante Verifica collegamento continua a effettuare soltanto una lettura.
 

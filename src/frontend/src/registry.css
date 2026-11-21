@@ -4,6 +4,19 @@
   border-bottom: 1px solid #dce3e7;
   margin-bottom: 26px;
 }
+.thermal-registry {
+  margin-top: 0;
+}
+.thermal-registry > .text-button {
+  margin-bottom: 16px;
+}
+.thermal-history-address {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #74828b;
+  overflow-wrap: anywhere;
+}
 .device-tabs button {
   border: 0;
   border-radius: 0;

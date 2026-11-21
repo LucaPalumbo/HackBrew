@@ -17,6 +17,7 @@ def test_register_verify_and_recover_thermal_device(
     with thermal_simulator() as simulator:
         page.set_viewport_size({"width": width, "height": height})
         page.goto(str(api.base_url) + "?page=devices&tab=thermal")
+        page.get_by_role("button", name="Aggiungi dispositivo termico", exact=True).click()
         page.get_by_label("Nome del dispositivo termico", exact=True).fill("Frigo combinato")
         page.get_by_label("Funzioni del dispositivo", exact=True).select_option("both")
         page.get_by_label("Indirizzo HTTP", exact=True).fill("http://thermal-both:8000/")
@@ -55,6 +56,7 @@ def test_invalid_address_unreachable_device_and_duplicate_registration(
     page.goto(str(api.base_url) + "?page=devices&tab=thermal")
     registration = page.get_by_role("region", name="Registrazione dispositivo termico", exact=True)
     expect(page.get_by_text("Nessun dispositivo termico registrato.", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Aggiungi dispositivo termico", exact=True).click()
     page.get_by_label("Nome del dispositivo termico", exact=True).fill("Frigo spento")
     page.get_by_label("Funzioni del dispositivo", exact=True).select_option("cooling")
     page.get_by_label("Indirizzo HTTP", exact=True).fill("ftp://frigo.local")
@@ -69,6 +71,7 @@ def test_invalid_address_unreachable_device_and_duplicate_registration(
     expect(card).to_contain_text("Stato sconosciuto")
     expect(card.get_by_role("alert")).to_contain_text("Verifica HTTP fallita")
     expect(card).not_to_contain_text("Spento confermato")
+    page.get_by_role("button", name="Aggiungi dispositivo termico", exact=True).click()
     page.get_by_label("Nome del dispositivo termico", exact=True).fill("Duplicato")
     page.get_by_label("Indirizzo HTTP", exact=True).fill("http://THERMAL-cooling:1/")
     registration.get_by_role("button", name="Registra dispositivo termico", exact=True).click()

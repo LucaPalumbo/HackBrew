@@ -543,7 +543,14 @@ watch(
             </div>
             <div v-for="device in fermentation.devices" :key="device.id">
               <dt>{{ capabilityNames[device.capability] }}</dt>
-              <dd>{{ device.name }}</dd>
+              <dd>
+                {{ device.name
+                }}<small
+                  v-if="device.base_url"
+                  class="thermal-history-address"
+                  >{{ device.base_url }}</small
+                >
+              </dd>
             </div>
           </dl>
           <p v-if="fermentation.control_mode === 'monitor_only'">

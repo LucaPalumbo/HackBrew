@@ -81,3 +81,17 @@ def arrange_registry_before_management(cycles: list[dict[str, Any]]) -> None:
             {"$unset": {"archived": "", "registry_revision": ""}},
         )
         db.fermentations.insert_many(cycles)
+
+
+def arrange_thermal_registry_before_management(
+    devices: list[dict[str, Any]], cycle: dict[str, Any]
+) -> None:
+    """Prepare the previous thermal schema/index; assertions stay at HTTP boundaries."""
+    with isolated_database() as db:
+        db.thermal_devices.update_many(
+            {"_id": {"$in": [device["id"] for device in devices]}},
+            {"$unset": {"archived": "", "connection_revision": "", "registry_revision": ""}},
+        )
+        db.thermal_devices.create_index("base_url", unique=True)
+        db.thermal_devices.drop_index("active_thermal_address")
+        db.fermentations.insert_one(cycle)

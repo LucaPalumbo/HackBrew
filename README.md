@@ -108,7 +108,22 @@ Il [bridge reale aggiornato](https://github.com/LucaPalumbo/RaptPillGateway-ble-
 
 La scheda **Dispositivi → Dispositivi termici** permette di registrare nome, funzioni (**Riscaldamento**, **Raffreddamento** o entrambe) e indirizzo HTTP(S) dei dispositivi termici. L'indirizzo deve essere raggiungibile dal backend, senza credenziali, query o frammenti. **Verifica collegamento** legge lo stato effettivo, capacità e timeout/revisione applicati; un errore mostra **Stato sconosciuto**, conservando separatamente l'ultima conferma precedente. Registrazione e verifica non inviano comandi di accensione.
 
-`GET/POST /api/thermal-devices` elencano e registrano i dispositivi; `POST /api/thermal-devices/{id}/check` ne verifica il collegamento. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout globale parte da tre ore ed è configurabile nella pagina **Impostazioni**. La [regolazione termica](docs/integrations/thermal-regulation.md) è disponibile alla creazione della fermentazione.
+Premi **Aggiungi dispositivo termico** per aprire il modulo. Le card mostrano disponibilità, indirizzo, funzioni e conferme osservate. Se riservato, il dispositivo offre il collegamento alla fermentazione associata, anche quando è conclusa ma attende ancora lo spegnimento.
+
+**Modifica** permette di cambiare nome e indirizzo soltanto quando il dispositivo è libero; le funzioni restano immutabili. Un indirizzo equivalente, dopo normalizzazione, conserva le conferme; un indirizzo diverso mantiene l'identità ma azzera verifica e conferme del vecchio collegamento, compresa la sincronizzazione del timeout. Una risposta lenta del precedente collegamento non può ripristinarle. Il salvataggio conferma la modifica del registro: usa **Verifica collegamento** per osservare il nuovo dispositivo.
+
+**Rimuovi** richiede conferma ed è consentito solo in assenza di prenotazioni e spegnimenti pendenti. La rimozione archivia la registrazione: cicli, letture e istantanee di nome, funzioni e indirizzo rimangono consultabili in **Gestione**. L'indirizzo torna registrabile con una nuova identità. Il server controlla i vincoli anche quando cambiano dopo il caricamento del modulo; un conflitto conserva la bozza e permette di riprovare quando il dispositivo torna libero.
+
+| API registro termico | Risultato |
+| --- | --- |
+| `GET/POST /api/thermal-devices` | Elenca o registra i dispositivi operativi. |
+| `PATCH /api/thermal-devices/{id}` con `{"name":"Fascia IPA","base_url":"http://fascia.local"}` | Modifica uno o entrambi i campi di un dispositivo libero; restituisce il dispositivo aggiornato. Non cambia le funzioni. |
+| `DELETE /api/thermal-devices/{id}` | Archivia un dispositivo libero; HTTP 204 dopo la conferma del server. |
+| `POST /api/thermal-devices/{id}/check` | Verifica il collegamento senza comandi di accensione. |
+
+Le modifiche restituiscono HTTP 422 per input non valido, HTTP 409 per indirizzo duplicato o dispositivo riservato, HTTP 404 per identità assente/rimossa. L'indice degli indirizzi e i record precedenti si aggiornano automaticamente all'avvio, mantenendo il volume. La [guida dei dispositivi termici](docs/integrations/thermal-devices.md) definisce il contratto provvisorio e le conferme. Il timeout globale parte da tre ore ed è configurabile nella pagina **Impostazioni**. La [regolazione termica](docs/integrations/thermal-regulation.md) è disponibile alla creazione della fermentazione.
+
+Screenshot dalla suite browser: [editor termico desktop](docs/screenshots/thermal-editor-desktop.png) e [editor sul telefono](docs/screenshots/thermal-editor-mobile.png).
 
 Per provare la pagina con un dispositivo simulato opzionale:
 
@@ -363,6 +378,8 @@ Le prove del bridge avviano il vero eseguibile del gateway con input BLE determi
 **La repository del gateway è privata.** Prima di `test`, `test-recovery`, `test-registry-upgrade` o `check`, scegli una delle modalità: usa una checkout a cui hai accesso con `export HACKBREW_GATEWAY_SOURCE=/percorso/assoluto/RaptPillGateway-ble-http` (per riprodurre la consegna, commit `de4cd6395b67b97f154fe0ed6f5cd8fa82a35e90`), oppure esporta `HACKBREW_GATEWAY_TOKEN` con una credenziale GitHub autorizzata alla lettura della repository. Con GitHub CLI già autenticata puoi usare `export HACKBREW_GATEWAY_TOKEN="$(gh auth token)"`. Questa seconda modalità scarica il commit fissato in Compose e passa il token solo come secret di build, senza salvarlo nell'immagine o nella configurazione dei servizi. Non inserire credenziali negli URL. `up`, `dev`, build applicativa, lint e typecheck non richiedono il gateway. La [guida](docs/integrations/rapt-gateway.md) dettaglia entrambe le opzioni.
 
 Il controllo `./scripts/hackbrew test-registry-upgrade`, incluso anche in `test` senza argomenti e `check`, prepara un database standalone con record del formato precedente, lo converte a replica set sullo stesso volume, applica rinomina/rimozione e crea un ciclo con le nuove transazioni. Ricrea poi i container mantenendo il volume e verifica attraverso HTTP identità, storico, diagnostica, bridge e recupero esplicito di un MAC rimosso. La preparazione del solo formato precedente avviene nel database di test; le asserzioni osservano esclusivamente le API. La prova usa un progetto Compose temporaneo dedicato e rimuove solo il proprio volume.
+
+La stessa prova include il precedente registro termico e l'indice univoco degli indirizzi: verifica l'aggiornamento delle istantanee storiche, rinomina/cambio indirizzo, rimozione persistente e riuso di un indirizzo archiviato con una nuova identità. Per le sole modifiche termiche usa `./scripts/hackbrew test tests/integration/test_thermal_management.py tests/browser/test_thermal_management_dashboard.py`.
 
 Il controllo completo conserva fuori dall'applicazione snapshot JSON e riavvia realmente l'applicazione sullo stesso volume di test in due scenari. Il primo prepara il vincolo globale della #9 e verifica la sua sostituzione con quello per pillola, senza perdere registrazioni, ciclo o letture. Il secondo salva due fermentazioni attive e una conclusa, verificando dopo il riavvio assegnazioni, misure, deduplicazione concorrente, storico browser e vincoli di riuso per pillola. Tutte le asserzioni osservano API e browser; la preparazione degli indici precedenti è confinata al solo database di test.
 
