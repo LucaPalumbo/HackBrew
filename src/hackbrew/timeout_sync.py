@@ -69,9 +69,12 @@ def configuration_command(
 def lock_current_connection(
     db: Database[dict[str, Any]], connection: dict[str, Any], session: ClientSession
 ) -> bool:
-    return db.thermal_devices.find_one_and_update(
-        connection, {"$inc": {"registry_revision": 1}}, session=session
-    ) is not None
+    return (
+        db.thermal_devices.find_one_and_update(
+            connection, {"$inc": {"registry_revision": 1}}, session=session
+        )
+        is not None
+    )
 
 
 def synchronize_device(db: Database[dict[str, Any]], device: dict[str, Any]) -> None:
