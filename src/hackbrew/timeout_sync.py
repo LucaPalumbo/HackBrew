@@ -66,6 +66,14 @@ def configuration_command(
     return TimeoutConfiguration.model_validate(document["command"])
 
 
+def lock_current_connection(
+    db: Database[dict[str, Any]], connection: dict[str, Any], session: ClientSession
+) -> bool:
+    return db.thermal_devices.find_one_and_update(
+        connection, {"$inc": {"registry_revision": 1}}, session=session
+    ) is not None
+
+
 def synchronize_device(db: Database[dict[str, Any]], device: dict[str, Any]) -> None:
     connection = {
         "_id": device["_id"],
@@ -77,12 +85,7 @@ def synchronize_device(db: Database[dict[str, Any]], device: dict[str, Any]) -> 
     duration = configuration["communication_timeout_seconds"]
 
     def begin(session: ClientSession) -> dict[str, Any] | None:
-        if (
-            db.thermal_devices.find_one_and_update(
-                connection, {"$inc": {"registry_revision": 1}}, session=session
-            )
-            is None
-        ):
+        if not lock_current_connection(db, connection, session):
             return None
         return db.device_timeout_sync.find_one_and_update(
             {"_id": device["_id"]},
@@ -143,12 +146,7 @@ def synchronize_device(db: Database[dict[str, Any]], device: dict[str, Any]) -> 
         update = {"status": "error", "error": str(error)}
 
     def finish(session: ClientSession) -> None:
-        if (
-            db.thermal_devices.find_one_and_update(
-                connection, {"$inc": {"registry_revision": 1}}, session=session
-            )
-            is None
-        ):
+        if not lock_current_connection(db, connection, session):
             return
         db.device_timeout_sync.update_one(
             {

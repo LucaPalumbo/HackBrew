@@ -147,17 +147,7 @@ def register_device(payload: ThermalDeviceRegistration, request: Request) -> dic
         **payload.model_dump(),
         "connection_revision": 0,
         "archived": False,
-        "verification_status": "unverified",
-        "actual_mode": None,
-        "desired_mode": None,
-        "confirmed_at": None,
-        "last_confirmation": None,
-        "applied_timeout_seconds": None,
-        "applied_config_revision": None,
-        "communication_error": None,
-        "checked_at": None,
-        "reported_capability": None,
-        "application_status": None,
+        **unknown_observation(),
     }
     try:
         database(request).thermal_devices.insert_one(document)
