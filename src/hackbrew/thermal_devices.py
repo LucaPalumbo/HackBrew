@@ -172,7 +172,9 @@ def update_device(
         mutation: dict[str, Any] = {"$set": values}
         if address_changed:
             mutation["$inc"] = {"check_revision": 1, "connection_revision": 1}
-            db.device_timeout_sync.delete_one({"_id": identifier}, session=session)
+            db.device_timeout_sync.delete_many(
+                {"$or": [{"_id": identifier}, {"device_id": identifier}]}, session=session
+            )
         db.thermal_devices.update_one({"_id": identifier}, mutation, session=session)
         return {**device, **values}
 
@@ -194,7 +196,9 @@ def remove_device(identifier: str, request: Request) -> Response:
             {"$set": {"archived": True}, "$inc": {"check_revision": 1, "connection_revision": 1}},
             session=session,
         )
-        db.device_timeout_sync.delete_one({"_id": identifier}, session=session)
+        db.device_timeout_sync.delete_many(
+            {"$or": [{"_id": identifier}, {"device_id": identifier}]}, session=session
+        )
 
     registry_transaction(db, remove)
     return Response(status_code=204)
