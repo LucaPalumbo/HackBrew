@@ -360,8 +360,9 @@ def test_device_tabs_and_selected_diagnostics_survive_history_and_removal(
     expect(thermal_tab).to_have_attribute("aria-selected", "true")
     page.reload()
     expect(thermal_tab).to_have_attribute("aria-selected", "true")
+    page.get_by_role("button", name="Aggiungi dispositivo termico", exact=True).click()
     expect(
-        page.get_by_role("heading", name="Registra un dispositivo termico", exact=True)
+        page.get_by_role("region", name="Registrazione dispositivo termico", exact=True)
     ).to_be_visible()
     pills_tab.click()
     page.get_by_role("region", name="Pillola Seconda pillola", exact=True).get_by_role(
