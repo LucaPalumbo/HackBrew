@@ -152,7 +152,15 @@ def verify_database_outage(
     assert (
         current.get_by_label("Acquisizione della lettura").get_attribute("datetime") == acquired_at
     )
-    finish_fermentation(current)
+    with current.expect_response(
+        lambda response: (
+            response.request.method == "POST"
+            and response.url.endswith(f"/api/fermentations/{expected['active']['id']}/end")
+        ),
+        timeout=10000,
+    ) as failed_end:
+        finish_fermentation(current)
+    assert failed_end.value.status == 503
     expect(current.get_by_role("alert").filter(has_text="Archivio delle letture")).to_be_visible()
     expect(current.get_by_role("status", name="Esito operazione")).to_have_count(0)
     current.get_by_role("dialog", name="Concludi la fermentazione").get_by_role(
