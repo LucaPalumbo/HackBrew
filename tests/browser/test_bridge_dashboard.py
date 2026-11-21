@@ -27,6 +27,7 @@ def test_web_registration_adds_sources_to_the_running_real_bridge(
             ("Pillola IPA", "aa-bb-cc-dd-ee-ff", "valid"),
             ("Pillola Stout", "112233445566", "invalid_velocity"),
         ):
+            page.get_by_role("button", name="Aggiungi pillola", exact=True).click()
             page.get_by_label("Nome della pillola", exact=True).fill(name)
             page.get_by_label("MAC Bluetooth", exact=True).fill(mac)
             page.get_by_role("button", name="Registra pillola", exact=True).click()
@@ -39,10 +40,24 @@ def test_web_registration_adds_sources_to_the_running_real_bridge(
             expect(card).to_contain_text("1.021" if fixture == "valid" else "1.011")
         first = page.get_by_role("region", name="Pillola Pillola IPA", exact=True)
         second = page.get_by_role("region", name="Pillola Pillola Stout", exact=True)
-        expect(first).to_contain_text("19,685938")
-        expect(first).to_contain_text("-14,821796")
-        expect(second).to_contain_text("23,935938")
-        expect(second).to_contain_text("misura non valida")
+        expect(first).to_contain_text("19,7")
+        expect(second).to_contain_text("23,9")
+        first.get_by_role("link", name="Esplora letture", exact=True).click()
+        expect(page.get_by_role("region", name="Temperatura", exact=True)).to_contain_text(
+            "19,685938"
+        )
+        expect(page.get_by_role("region", name="Velocità densità", exact=True)).to_contain_text(
+            "-14,821796"
+        )
+        page.go_back()
+        second.get_by_role("link", name="Esplora letture", exact=True).click()
+        expect(page.get_by_role("region", name="Temperatura", exact=True)).to_contain_text(
+            "23,935938"
+        )
+        expect(page.get_by_role("region", name="Velocità densità", exact=True)).to_contain_text(
+            "misura non valida"
+        )
+        page.go_back()
         page.reload()
         expect(first).to_contain_text("1.021")
         expect(second).to_contain_text("1.011")

@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/bridge")
 def bridge_pills(request: Request) -> dict[str, object]:
     pills = [
         {"id": pill["_id"], "name": pill["name"], "mac": pill["mac"]}
-        for pill in database(request).pills.find().sort("_id", 1)
+        for pill in database(request).pills.find({"archived": {"$ne": True}}).sort("_id", 1)
     ]
     # Content revision: computed from this exact snapshot, independent of reads,
     # live measurements, assignments and process restarts.

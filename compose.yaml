@@ -6,7 +6,7 @@ services:
       context: .
       target: runtime
     environment:
-      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=hackbrew
       MONGODB_DATABASE: ${MONGODB_DATABASE:-hackbrew}
     ports:
       - "${HACKBREW_BIND_ADDRESS:-127.0.0.1}:${HACKBREW_PORT:-8080}:8000"
@@ -25,11 +25,13 @@ services:
       start_period: 5s
 
   mongo:
+    command: ["mongod", "--replSet", "hackbrew", "--bind_ip_all"]
     image: mongo:8.0@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
     volumes:
+      - ./scripts/mongo-health.js:/opt/hackbrew/mongo-health.js:ro,z
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      test: ["CMD", "mongosh", "--quiet", "/opt/hackbrew/mongo-health.js"]
       interval: 3s
       timeout: 5s
       retries: 20

@@ -10,12 +10,13 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException, Query, Request
 from pymongo import ReturnDocument
+from pymongo.client_session import ClientSession
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
 from hackbrew.models import FermentationStart, ThermalSettingsUpdate
-from hackbrew.pills import require_pill
-from hackbrew.storage import database
+from hackbrew.pills import lock_pill
+from hackbrew.storage import database, registry_transaction
 
 router = APIRouter(prefix="/api/fermentations")
 
@@ -198,13 +199,19 @@ def get_active(request: Request) -> dict[str, object]:
 @router.post("", status_code=201)
 def start_fermentation(payload: FermentationStart, request: Request) -> dict[str, object]:
     db = database(request)
-    pill = require_pill(db, payload.pill_id)
+    return registry_transaction(db, lambda session: create_fermentation(db, payload, session))
+
+
+def create_fermentation(
+    db: Database[dict[str, Any]], payload: FermentationStart, session: ClientSession
+) -> dict[str, object]:
+    pill = lock_pill(db, payload.pill_id, session)
     devices = []
     for role, capability in (("heater", "heating"), ("cooler", "cooling"), ("combined", "both")):
         identifier = getattr(payload, role + "_id")
         if identifier is None:
             continue
-        device = db.thermal_devices.find_one({"_id": identifier})
+        device = db.thermal_devices.find_one({"_id": identifier}, session=session)
         if device is None:
             raise HTTPException(404, "Dispositivo termico non trovato.")
         if device["capability"] != capability:
@@ -214,14 +221,14 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
         devices.append(
             {"id": device["_id"], "name": device["name"], "capability": capability, "role": role}
         )
-    if db.fermentations.find_one({"status": "active", "pill_id": pill["_id"]}):
+    if db.fermentations.find_one({"status": "active", "pill_id": pill["_id"]}, session=session):
         raise HTTPException(
             409,
             "C'è già una fermentazione attiva per questa pillola. "
             "Terminala prima di riutilizzarla.",
         )
     last = db.fermentations.find_one(
-        {"status": "concluded", "pill_id": pill["_id"]}, sort=[("ended_at", -1)]
+        {"status": "concluded", "pill_id": pill["_id"]}, sort=[("ended_at", -1)], session=session
     )
     started_at = monitoring_time()
     if last:
@@ -282,7 +289,7 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
                 }
                 for device in devices
             }
-        db.fermentations.insert_one(document)
+        db.fermentations.insert_one(document, session=session)
     except DuplicateKeyError:
         raise HTTPException(
             409,
@@ -292,8 +299,10 @@ def start_fermentation(payload: FermentationStart, request: Request) -> dict[str
     return {"fermentation": public_fermentation(document)}
 
 
-def require_fermentation(db: Database[dict[str, Any]], identifier: str) -> dict[str, Any]:
-    document = db.fermentations.find_one({"_id": identifier})
+def require_fermentation(
+    db: Database[dict[str, Any]], identifier: str, session: ClientSession | None = None
+) -> dict[str, Any]:
+    document = db.fermentations.find_one({"_id": identifier}, session=session)
     if document is None:
         raise HTTPException(404, "Fermentazione non trovata.")
     return document
@@ -367,6 +376,16 @@ def change_thermal_settings(
 @router.post("/{identifier}/end")
 def end_fermentation(identifier: str, request: Request) -> dict[str, object]:
     db = database(request)
+    return registry_transaction(db, lambda session: conclude_fermentation(db, identifier, session))
+
+
+def conclude_fermentation(
+    db: Database[dict[str, Any]], identifier: str, session: ClientSession
+) -> dict[str, object]:
+    current = require_fermentation(db, identifier, session)
+    if current["status"] != "active":
+        return {"fermentation": public_fermentation(current)}
+    lock_pill(db, current["pill_id"], session)
     document = db.fermentations.find_one_and_update(
         {"_id": identifier, "status": "active"},
         [
@@ -421,9 +440,10 @@ def end_fermentation(identifier: str, request: Request) -> dict[str, object]:
             }
         ],
         return_document=ReturnDocument.AFTER,
+        session=session,
     )
     if document is None:
-        document = require_fermentation(db, identifier)
+        document = require_fermentation(db, identifier, session)
     return {"fermentation": public_fermentation(document)}
 
 

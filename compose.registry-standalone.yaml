@@ -1,0 +1,11 @@
+services:
+  mongo:
+    command: ["mongod", "--bind_ip_all"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+  app:
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+  tests:
+    environment:
+      MONGODB_URI: mongodb://mongo:27017

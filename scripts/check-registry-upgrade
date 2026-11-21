@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+
+registry_parent=${1:?Pass the isolated test project name}
+case "$registry_parent" in
+    hackbrew-tests-*) ;;
+    *) printf '%s\n' 'Registry upgrade checks require an isolated hackbrew-tests-* project.'; exit 2 ;;
+esac
+registry_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+registry_project="$registry_parent-registry-upgrade"
+export HACKBREW_REGISTRY_UPGRADE_APP_IMAGE="$registry_parent-app"
+export HACKBREW_REGISTRY_UPGRADE_TEST_IMAGE="$registry_parent-tests"
+
+compose() {
+    docker compose --project-name "$registry_project" \
+        -f "$registry_root/compose.test.yaml" -f "$registry_root/compose.registry-upgrade.yaml" "$@"
+}
+
+standalone() {
+    compose -f "$registry_root/compose.registry-standalone.yaml" "$@"
+}
+
+cleanup() {
+    registry_exit_code=$?
+    trap - EXIT
+    registry_cleanup_code=0
+    compose down --volumes --remove-orphans || registry_cleanup_code=$?
+    if [ "$registry_exit_code" -eq 0 ]; then registry_exit_code=$registry_cleanup_code; fi
+    exit "$registry_exit_code"
+}
+trap cleanup EXIT
+
+standalone up --no-build --detach --wait app
+registry_state=$(standalone run --rm --no-deps -T tests python -m tests.check_registry_upgrade seed)
+standalone stop app mongo
+compose up --no-build --force-recreate --detach --wait app
+registry_state=$(printf '%s\n' "$registry_state" | compose run --rm --no-deps -T tests python -m tests.check_registry_upgrade upgrade)
+compose down --remove-orphans
+compose up --no-build --detach --wait app
+printf '%s\n' "$registry_state" | compose run --rm --no-deps -T tests python -m tests.check_registry_upgrade verify

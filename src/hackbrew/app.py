@@ -119,6 +119,10 @@ def latest_reading(request: Request, pill_id: str | None = None) -> dict[str, ob
         **active,
         "communication_timeout_seconds": configuration["communication_timeout_seconds"],
         "settings_revision": configuration["revision"],
+        "registry_revision": sum(
+            row.get("registry_revision", 0)
+            for row in db.pills.find({}, {"registry_revision": True})
+        ),
         "regulation_revision": sum(
             row.get("control_revision", 0)
             for row in db.fermentations.find(
@@ -143,6 +147,9 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
             return
         persisted_state = (
             snapshot["settings_revision"],
+            # A brief assignment can begin and end between two polls. An HTTP
+            # refresh may observe it, so equal final contents still need an event.
+            snapshot["registry_revision"],
             snapshot["regulation_revision"],
             snapshot["active_fermentations"],
             snapshot["pills"],
@@ -164,7 +171,7 @@ async def reading_events(request: Request) -> AsyncIterator[ServerSentEvent]:
 @app.post("/telemetry")
 def receive_reading(payload: GatewayReading, request: Request) -> dict[str, object]:
     db = database(request)
-    pill = db.pills.find_one({"mac": payload.pill_mac})
+    pill = db.pills.find_one({"mac": payload.pill_mac, "archived": {"$ne": True}})
     if pill is None:
         raise HTTPException(404, "MAC Bluetooth non registrato. Registra prima la pillola.")
     reading = payload.model_dump()

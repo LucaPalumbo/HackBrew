@@ -69,10 +69,14 @@ def seed(api: httpx.Client) -> dict[str, Any]:
         "reading": reading,
         "closed_history": api.get(f"/api/fermentations/{closed['id']}/readings").json()["readings"],
         "active_history": api.get(f"/api/fermentations/{active['id']}/readings").json()["readings"],
+        "pills": api.get("/api/pills").json(),
+        "bridge_registry": api.get("/api/bridge/pills").json(),
     }
 
 
 def assert_persisted_state(api: httpx.Client, expected: dict[str, Any]) -> None:
+    assert api.get("/api/pills").json() == expected["pills"]
+    assert api.get("/api/bridge/pills").json() == expected["bridge_registry"]
     assert api.get("/api/fermentations/active").json()["fermentation"] == expected["active"]
     for kind in ("closed", "active"):
         identifier = expected[kind]["id"]
@@ -98,6 +102,10 @@ def verify_database_outage(
             {"name": "Non salvata", "pill_id": expected["active"]["pill_id"]},
         ),
         ("POST", "/api/pills", {"name": "Non registrata", "mac": "11:22:33:44:55:66"}),
+        ("GET", "/api/pills", None),
+        ("GET", "/api/bridge/pills", None),
+        ("PATCH", f"/api/pills/{expected['active']['pill_id']}", {"name": "Non rinominata"}),
+        ("DELETE", f"/api/pills/{expected['active']['pill_id']}", None),
         ("POST", f"/api/fermentations/{expected['active']['id']}/end", None),
         ("GET", "/api/readings/latest", None),
         ("GET", "/api/settings", None),
@@ -144,7 +152,15 @@ def verify_database_outage(
     assert (
         current.get_by_label("Acquisizione della lettura").get_attribute("datetime") == acquired_at
     )
-    finish_fermentation(current)
+    with current.expect_response(
+        lambda response: (
+            response.request.method == "POST"
+            and response.url.endswith(f"/api/fermentations/{expected['active']['id']}/end")
+        ),
+        timeout=10000,
+    ) as failed_end:
+        finish_fermentation(current)
+    assert failed_end.value.status == 503
     expect(current.get_by_role("alert").filter(has_text="Archivio delle letture")).to_be_visible()
     expect(current.get_by_role("status", name="Esito operazione")).to_have_count(0)
     current.get_by_role("dialog", name="Concludi la fermentazione").get_by_role(
