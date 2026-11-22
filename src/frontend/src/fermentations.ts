@@ -16,6 +16,7 @@ export type ThermalAssignment = {
   name: string
   capability: Capability
   role: 'heater' | 'cooler' | 'combined'
+  base_url?: string
 }
 export type DeviceControl = {
   desired_mode: ThermalMode

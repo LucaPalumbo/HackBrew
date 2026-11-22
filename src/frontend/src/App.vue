@@ -439,7 +439,7 @@ onUnmounted(() => {
             role="tabpanel"
             aria-labelledby="device-tab-thermal"
           >
-            <ThermalDeviceRegistry />
+            <ThermalDeviceRegistry @select="selectFermentation" />
           </div>
         </template>
         <SettingsPage v-else-if="page === 'settings'" />

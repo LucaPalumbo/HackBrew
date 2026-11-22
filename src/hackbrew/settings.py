@@ -39,12 +39,23 @@ def timeout_configuration(db: Database[dict[str, Any]]) -> dict[str, Any]:
     return document
 
 
+def timeout_sync_identifier(device: dict[str, Any]) -> str:
+    """Each connection owns its observations; revision zero retains legacy records."""
+    identifier = str(device["_id"])
+    revision = device.get("connection_revision", 0)
+    return identifier if revision == 0 else f"{identifier}:{revision}"
+
+
 def settings_snapshot(db: Database[dict[str, Any]]) -> dict[str, Any]:
     configuration = timeout_configuration(db)
     observed = {entry["_id"]: entry for entry in db.device_timeout_sync.find()}
     devices = []
-    for device in db.thermal_devices.find().sort([("name", 1), ("_id", 1)]):
-        sync = observed.get(device["_id"], {})
+    for device in db.thermal_devices.find({"archived": {"$ne": True}}).sort(
+        [("name", 1), ("_id", 1)]
+    ):
+        sync = observed.get(timeout_sync_identifier(device), {})
+        if sync.get("connection_revision", 0) != device.get("connection_revision", 0):
+            sync = {}
         current = sync.get("desired_revision") == configuration["revision"]
         status = "pending"
         if current and sync.get("status") == "error":

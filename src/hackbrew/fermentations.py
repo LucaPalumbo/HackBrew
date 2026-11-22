@@ -17,6 +17,7 @@ from pymongo.errors import DuplicateKeyError
 from hackbrew.models import FermentationStart, ThermalSettingsUpdate
 from hackbrew.pills import lock_pill
 from hackbrew.storage import database, registry_transaction
+from hackbrew.thermal_devices import lock_thermal_device
 
 router = APIRouter(prefix="/api/fermentations")
 
@@ -68,6 +69,25 @@ def initialize_fermentations(db: Database[dict[str, Any]]) -> None:
                 }
             },
         )
+    # Older versions could not edit addresses; preserve their known association once.
+    for cycle in db.fermentations.find({"devices": {"$exists": True}}):
+        for assignment in cycle["devices"]:
+            if "base_url" in assignment:
+                continue
+            registered = db.thermal_devices.find_one({"_id": assignment["id"]})
+            if registered is not None:
+                db.fermentations.update_one(
+                    {
+                        "_id": cycle["_id"],
+                        "devices": {
+                            "$elemMatch": {
+                                "id": assignment["id"],
+                                "base_url": {"$exists": False},
+                            }
+                        },
+                    },
+                    {"$set": {"devices.$.base_url": registered["base_url"]}},
+                )
     db.fermentations.create_index(
         "reserved_device_ids",
         name="one_reservation_per_thermal_device",
@@ -211,15 +231,19 @@ def create_fermentation(
         identifier = getattr(payload, role + "_id")
         if identifier is None:
             continue
-        device = db.thermal_devices.find_one({"_id": identifier}, session=session)
-        if device is None:
-            raise HTTPException(404, "Dispositivo termico non trovato.")
+        device = lock_thermal_device(db, identifier, session)
         if device["capability"] != capability:
             raise HTTPException(
                 422, "Le capacità del dispositivo non sono compatibili con la funzione scelta."
             )
         devices.append(
-            {"id": device["_id"], "name": device["name"], "capability": capability, "role": role}
+            {
+                "id": device["_id"],
+                "name": device["name"],
+                "capability": capability,
+                "role": role,
+                "base_url": device["base_url"],
+            }
         )
     if db.fermentations.find_one({"status": "active", "pill_id": pill["_id"]}, session=session):
         raise HTTPException(

@@ -12,7 +12,7 @@ from pymongo import ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from hackbrew.settings import timeout_configuration
+from hackbrew.settings import timeout_configuration, timeout_sync_identifier
 from hackbrew.thermal_client import ActuatorError, ThermalDeviceClient
 from hackbrew.thermal_contract import DeviceState, TimeoutConfiguration
 
@@ -65,23 +65,35 @@ def configuration_command(
 
 
 def synchronize_device(db: Database[dict[str, Any]], device: dict[str, Any]) -> None:
-    if db.thermal_devices.find_one({"_id": device["_id"]}) is None:
-        return
+    connection = {
+        "_id": device["_id"],
+        "connection_revision": device.get("connection_revision", 0),
+        "archived": {"$ne": True},
+    }
     configuration = timeout_configuration(db)
     revision = configuration["revision"]
     duration = configuration["communication_timeout_seconds"]
+
+    if db.thermal_devices.find_one(connection) is None:
+        return
+    sync_identifier = timeout_sync_identifier(device)
     try:
         attempt = db.device_timeout_sync.find_one_and_update(
-            {"_id": device["_id"]},
+            {"_id": sync_identifier},
             {
                 "$inc": {"attempt": 1},
-                "$set": {"desired_revision": revision, "last_attempt_at": datetime.now(UTC)},
+                "$set": {
+                    "device_id": device["_id"],
+                    "connection_revision": device.get("connection_revision", 0),
+                    "desired_revision": revision,
+                    "last_attempt_at": datetime.now(UTC),
+                },
             },
             upsert=True,
             return_document=ReturnDocument.AFTER,
         )
     except DuplicateKeyError:
-        return  # Another process owns a newer attempt; its result is authoritative.
+        return
     assert attempt is not None
     try:
         client = ThermalDeviceClient(device["base_url"])
@@ -93,7 +105,7 @@ def synchronize_device(db: Database[dict[str, Any]], device: dict[str, Any]) -> 
             command = configuration_command(db, device["_id"], configuration, state)
             if timeout_configuration(db)["revision"] != revision:
                 return
-            if db.thermal_devices.find_one({"_id": device["_id"]}) is None:
+            if db.thermal_devices.find_one(connection) is None:
                 return
             identity = state.device_id
             state = client.configure_timeout(command)
@@ -119,8 +131,9 @@ def synchronize_device(db: Database[dict[str, Any]], device: dict[str, Any]) -> 
             )
     except ActuatorError as error:
         update = {"status": "error", "error": str(error)}
+
     db.device_timeout_sync.update_one(
-        {"_id": device["_id"], "attempt": attempt["attempt"], "desired_revision": revision},
+        {"_id": sync_identifier, "attempt": attempt["attempt"], "desired_revision": revision},
         {"$set": update},
     )
 
@@ -137,7 +150,9 @@ async def synchronize_timeouts(db: Database[dict[str, Any]]) -> None:
 
     while True:
         try:
-            devices = await asyncio.to_thread(lambda: list(db.thermal_devices.find()))
+            devices = await asyncio.to_thread(
+                lambda: list(db.thermal_devices.find({"archived": {"$ne": True}}))
+            )
             await asyncio.gather(*(synchronize(device) for device in devices))
         except PyMongoError as error:
             logger.warning("Timeout synchronization unavailable: %s", error)

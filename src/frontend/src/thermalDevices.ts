@@ -8,6 +8,7 @@ export type ThermalDevice = {
   base_url: string
   available: boolean
   reserved_fermentation_id: string | null
+  reserved_fermentation_name: string | null
   verification_status: 'unverified' | 'confirmed' | 'pending' | 'error'
   application_status: 'applied' | 'pending' | 'unknown' | 'timed_out' | null
   actual_mode: ThermalMode | null

@@ -10,7 +10,11 @@ from uuid import uuid4
 
 import httpx
 
-from tests.database import arrange_registry_before_management, reset_test_database
+from tests.database import (
+    arrange_registry_before_management,
+    arrange_thermal_registry_before_management,
+    reset_test_database,
+)
 from tests.payloads import gateway_lettura
 
 
@@ -58,10 +62,83 @@ def seed(api: httpx.Client) -> dict[str, Any]:
         api.get("/api/readings/latest", params={"pill_id": pill["id"]}).json()["reading"]
         for pill in pills
     ]
+    devices = [
+        api.post(
+            "/api/thermal-devices",
+            json={
+                "name": f"Storico {capability}",
+                "capability": capability,
+                "base_url": f"http://legacy-{capability}.local",
+            },
+        ).json()["device"]
+        for capability in ("heating", "cooling")
+    ]
+    control = {
+        "status": "stopped",
+        "reason": "Spegnimento confermato.",
+        "desired_mode": "off",
+        "actual_mode": "off",
+        "confirmed_at": None,
+        "command": None,
+        "last_sent_at": None,
+        "needs_off": False,
+        "error": None,
+    }
+    legacy_cycle = {
+        **cycles[0],
+        "_id": str(uuid4()),
+        "name": "Birra con equipaggiamento storico",
+        "started_at": now - 10800,
+        "ended_at": now - 7200,
+        "control_mode": "heating_cooling",
+        "heater_id": devices[0]["id"],
+        "heater_name": devices[0]["name"],
+        "heater_reserved": False,
+        "cooler_id": devices[1]["id"],
+        "combined_id": None,
+        "devices": [
+            {
+                "id": device["id"],
+                "name": device["name"],
+                "capability": device["capability"],
+                "role": role,
+            }
+            for device, role in zip(devices, ("heater", "cooler"), strict=True)
+        ],
+        "reserved_device_ids": [],
+        "thermal_reserved": False,
+        "control_revision": 1,
+        "temperature_min": 18,
+        "temperature_max": 22,
+        "hysteresis": 0.5,
+        "thermal_settings_revision": 0,
+        "thermal_settings_history": [
+            {
+                "revision": 0,
+                "changed_at": now - 10800,
+                "temperature_min": 18,
+                "temperature_max": 22,
+                "hysteresis": 0.5,
+            }
+        ],
+        "regulation": {
+            **control,
+            "devices": {device["id"]: {**control, "reserved": False} for device in devices},
+        },
+    }
+    arrange_thermal_registry_before_management(devices, legacy_cycle)
+    historic = api.get(f"/api/fermentations/{legacy_cycle['_id']}").json()["fermentation"]
+    # Address associations did not change before registry editing existed.
+    for assignment, device in zip(historic["devices"], devices, strict=True):
+        assignment["base_url"] = device["base_url"]
+    expected["thermal_history"] = historic
+    expected["thermal_devices"] = devices
     return expected
 
 
 def verify_history(api: httpx.Client, expected: dict[str, Any]) -> None:
+    historic = expected["thermal_history"]
+    assert api.get(f"/api/fermentations/{historic['id']}").json()["fermentation"] == historic
     for original in expected["cycles"]:
         identifier = original["fermentation"]["id"]
         assert (
@@ -78,6 +155,19 @@ def upgrade(api: httpx.Client, expected: dict[str, Any]) -> dict[str, Any]:
     assert api.get("/api/pills").json()["pills"] == expected["pills"]
     assert api.get("/api/bridge/pills").json() == expected["bridge"]
     verify_history(api, expected)
+    heater, cooler = expected["thermal_devices"]
+    updated = api.patch(
+        f"/api/thermal-devices/{heater['id']}",
+        json={
+            "name": "Fascia aggiornata",
+            "base_url": "http://new-heating.local",
+        },
+    )
+    updated.raise_for_status()
+    assert updated.json()["device"]["id"] == heater["id"]
+    assert updated.json()["device"]["last_confirmation"] is None
+    assert api.delete(f"/api/thermal-devices/{cooler['id']}").status_code == 204
+    expected["thermal_registry"] = api.get("/api/thermal-devices").json()["devices"]
     for pill, reading in zip(expected["pills"], expected["diagnostics"], strict=True):
         assert (
             api.get("/api/readings/latest", params={"pill_id": pill["id"]}).json()["reading"]
@@ -98,6 +188,20 @@ def upgrade(api: httpx.Client, expected: dict[str, Any]) -> dict[str, Any]:
 
 
 def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
+    assert api.get("/api/thermal-devices").json()["devices"] == expected["thermal_registry"]
+    removed_device = expected["thermal_devices"][1]
+    assert api.post(f"/api/thermal-devices/{removed_device['id']}/check").status_code == 404
+    assert api.delete(f"/api/thermal-devices/{removed_device['id']}").status_code == 404
+    replacement = api.post(
+        "/api/thermal-devices",
+        json={
+            "name": "Nuovo raffreddatore",
+            "capability": "cooling",
+            "base_url": removed_device["base_url"],
+        },
+    )
+    assert replacement.status_code == 201
+    assert replacement.json()["device"]["id"] != removed_device["id"]
     assert api.get("/api/pills").json()["pills"] == expected["managed_pills"]
     assert api.get("/api/bridge/pills").json() == expected["managed_bridge"]
     identifier = expected["active"]["id"]
