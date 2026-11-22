@@ -37,16 +37,23 @@ def test_one_chart_exposes_seven_series_and_exact_values(
     expect(page.get_by_role("img")).to_have_count(1)
     legend = chart.get_by_role("group", name="Serie del grafico", exact=True)
     expect(legend.get_by_role("checkbox")).to_have_count(7)
-    for label in (
-        "Temperatura °C",
-        "Densità SG",
-        "Batteria %",
-        "Velocità densità · punti SG/giorno",
-        "Accelerazione X · unità non specificata",
-        "Accelerazione Y · unità non specificata",
-        "Accelerazione Z · unità non specificata",
+    for index, label in enumerate(
+        (
+            "Temperatura °C",
+            "Densità SG",
+            "Batteria %",
+            "Velocità densità · punti SG/giorno",
+            "Accelerazione X · unità non specificata",
+            "Accelerazione Y · unità non specificata",
+            "Accelerazione Z · unità non specificata",
+        )
     ):
-        expect(legend.get_by_role("checkbox", name=label, exact=True)).to_be_checked()
+        checkbox = legend.get_by_role("checkbox", name=label, exact=True)
+        if index < 2:
+            expect(checkbox).to_be_checked()
+        else:
+            expect(checkbox).not_to_be_checked()
+            checkbox.check()
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("columnheader")).to_have_count(8)
     for value in ("1.050125", "19,6875", "63,2734375", "-2,125", "-1,25", "0,75", "2,5"):
@@ -94,6 +101,8 @@ def test_sparse_samples_are_connected_by_a_visible_line_and_legend_controls_it(
     chart = page.get_by_role("region", name="Grafico delle misure", exact=True)
     canvas = chart.get_by_role("img", name="Grafico a linee: 2 letture", exact=True)
     expect(canvas).to_be_visible()
+    for checkbox in chart.get_by_role("checkbox").all():
+        checkbox.check()
     if width == 390:
         chart.get_by_label("Scala graduata", exact=True).select_option("density")
         expect(chart.get_by_role("checkbox", checked=True)).to_have_count(7)
@@ -275,6 +284,9 @@ def test_tooltip_shows_one_complete_original_sample_when_timestamps_are_equal(
         ).raise_for_status()
     page.goto(str(api.base_url) + "?fermentation=" + cycle["id"])
     chart = page.get_by_role("region", name="Grafico delle misure", exact=True)
+    expect(chart.get_by_role("checkbox")).to_have_count(7)
+    for checkbox in chart.get_by_role("checkbox").all():
+        checkbox.check()
     chart.get_by_role("img", name="Grafico a linee: 2 letture", exact=True).hover()
     tooltip = chart.get_by_role("status", name="Valori nel grafico", exact=True)
     expect(tooltip.get_by_role("definition")).to_have_count(7)

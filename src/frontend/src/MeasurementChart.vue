@@ -10,6 +10,7 @@ import {
 } from 'chart.js'
 import type { ChartOptions } from 'chart.js'
 import type { Reading } from './readings'
+import { curvePoints, type ChartContext, type CurvePoint } from './chartCurve'
 import {
   measurements,
   measurementScales,
@@ -19,7 +20,11 @@ import {
 import type { Measurement, MeasurementScale } from './measurements'
 
 Chart.register(LineController, LineElement, LinearScale, PointElement, Tooltip)
-const props = defineProps<{ readings: Reading[]; range?: [number, number] }>()
+const props = defineProps<{
+  readings: Reading[]
+  range?: [number, number]
+  context?: ChartContext
+}>()
 const emit = defineEmits<{ range: [start: number, end: number] }>()
 const gestureMode = ref<'zoom' | 'pan'>('zoom')
 const selection = ref<[number, number] | null>(null)
@@ -101,7 +106,12 @@ function wheel(event: WheelEvent) {
 }
 const canvas = ref<HTMLCanvasElement | null>(null)
 const descriptionId = useId()
-const visibility = ref(measurements.map(() => true))
+const visibility = ref(
+  measurements.map(
+    (metric) =>
+      metric.key === 'temperature' || metric.key === 'specific_gravity',
+  ),
+)
 const compact = ref(false)
 const graduatedScale = ref<MeasurementScale>('temperature')
 const tooltip = ref<{
@@ -109,7 +119,7 @@ const tooltip = ref<{
   lines: Array<{ label: string; value: string }>
 } | null>(null)
 const visibleCount = computed(() => visibility.value.filter(Boolean).length)
-type Point = { x: number; y: number | null }
+type Point = CurvePoint
 let chart: Chart<'line', Point[]> | undefined
 let observer: ResizeObserver | undefined
 const dates = new Intl.DateTimeFormat('it-IT', {
@@ -126,15 +136,12 @@ const fullDates = new Intl.DateTimeFormat('it-IT', {
   timeStyle: 'medium',
 })
 const ticks = new Intl.NumberFormat('it-IT', {
-  maximumSignificantDigits: 5,
+  maximumSignificantDigits: 12,
   useGrouping: false,
 })
 
 function points(metric: Measurement): Point[] {
-  return props.readings.map((reading) => ({
-    x: reading.timestamp * 1000,
-    y: measurementValue(reading, metric.key),
-  }))
+  return curvePoints(props.readings, metric, props.context, props.range)
 }
 function scaleVisible(scale: MeasurementScale): boolean {
   return measurements.some(
@@ -165,25 +172,51 @@ function scales(): NonNullable<ChartOptions<'line'>['scales']> {
       },
     },
     ...Object.fromEntries(
-      measurementScales.map((scale) => [
-        scale.id,
-        {
-          type: 'linear',
-          axis: 'y',
-          position: compact.value ? 'left' : scale.position,
-          display:
-            (!compact.value || graduatedScale.value === scale.id) &&
-            scaleVisible(scale.id),
-          title: { display: true, text: scale.label },
-          grid: {
-            drawOnChartArea: scale.id === gridScale,
+      measurementScales.map((scale) => {
+        const values = measurements.flatMap((metric, index) =>
+          metric.scale === scale.id && visibility.value[index]
+            ? points(metric).map((point) => point.y)
+            : [],
+        )
+        let minimum = Infinity,
+          maximum = -Infinity
+        for (const value of values) {
+          minimum = Math.min(minimum, value)
+          maximum = Math.max(maximum, value)
+        }
+        if (!values.length) {
+          minimum = 0
+          maximum = 1
+        }
+        const padding =
+          maximum === minimum
+            ? Math.abs(minimum) * 0.02 || 1
+            : maximum * 0.05 - minimum * 0.05
+        const low = minimum - padding,
+          high = maximum + padding
+        return [
+          scale.id,
+          {
+            type: 'linear',
+            axis: 'y',
+            min: Number.isFinite(low) ? low : minimum,
+            max: Number.isFinite(high) ? high : maximum,
+            position: compact.value ? 'left' : scale.position,
+            display:
+              (!compact.value || graduatedScale.value === scale.id) &&
+              scaleVisible(scale.id),
+            title: { display: true, text: scale.label },
+            grid: {
+              drawOnChartArea: scale.id === gridScale,
+            },
+            ticks: {
+              includeBounds: false,
+              maxTicksLimit: 8,
+              callback: (value: string | number) => ticks.format(Number(value)),
+            },
           },
-          ticks: {
-            maxTicksLimit: 6,
-            callback: (value: string | number) => ticks.format(Number(value)),
-          },
-        },
-      ]),
+        ]
+      }),
     ),
   }
 }
@@ -211,17 +244,21 @@ onMounted(() => {
   chart = new Chart<'line', Point[]>(canvas.value, {
     type: 'line',
     data: {
-      datasets: measurements.map((metric) => ({
+      datasets: measurements.map((metric, index) => ({
         label: metric.label,
+        hidden: !visibility.value[index],
         data: points(metric),
         yAxisID: metric.scale,
         borderColor: metric.color,
         backgroundColor: metric.color,
         borderDash: metric.dash,
         borderWidth: 2,
+        clip: 0,
         pointStyle: metric.marker,
-        pointRadius: 2.5,
-        pointHoverRadius: 5,
+        pointRadius: (context) =>
+          (context.raw as CurvePoint | undefined)?.context ? 0 : 2.5,
+        pointHoverRadius: (context) =>
+          (context.raw as CurvePoint | undefined)?.context ? 0 : 5,
         tension: 0,
         spanGaps: true,
         fill: false,
@@ -238,12 +275,13 @@ onMounted(() => {
       plugins: {
         tooltip: {
           enabled: false,
+          filter: (item) => !(item.raw as CurvePoint).context,
           external: ({ tooltip: model }) => {
             if (model.opacity === 0 || !model.dataPoints.length) {
               tooltip.value = null
               return
             }
-            const reading = props.readings[model.dataPoints[0]!.dataIndex]
+            const reading = (model.dataPoints[0]!.raw as CurvePoint).reading
             if (!reading) return
             tooltip.value = {
               timestamp: reading.timestamp,
@@ -275,6 +313,7 @@ onMounted(() => {
 })
 watch(() => props.readings, update)
 watch(() => props.range, update)
+watch(() => props.context, update)
 watch(graduatedScale, update)
 onUnmounted(() => {
   observer?.disconnect()

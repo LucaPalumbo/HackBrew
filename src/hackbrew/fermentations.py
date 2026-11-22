@@ -547,3 +547,41 @@ def get_readings(
     for reading in page:
         reading.pop("_id")
     return {"readings": list(reversed(page)), "next_before": next_before}
+
+
+@router.get("/{identifier}/chart-context")
+def get_chart_context(
+    identifier: str,
+    request: Request,
+    from_timestamp: float = Query(ge=0, allow_inf_nan=False),
+    to_timestamp: float = Query(ge=0, allow_inf_nan=False),
+) -> dict[str, object]:
+    db = database(request)
+    cycle = require_fermentation(db, identifier)
+    if from_timestamp > to_timestamp:
+        raise HTTPException(422, "Intervallo temporale non valido.")
+    context = {}
+    for key in (
+        "temperature",
+        "specific_gravity",
+        "battery",
+        "gravity_velocity",
+        "accel_x",
+        "accel_y",
+        "accel_z",
+    ):
+        usable: dict[str, Any] = {key: {"$ne": None}}
+        if key == "gravity_velocity":
+            usable["valid"] = {"$ne": False}
+        edges = {}
+        for side, operator, bound, direction in (
+            ("before", "$lt", from_timestamp, -1),
+            ("after", "$gt", to_timestamp, 1),
+        ):
+            edges[side] = db.fermentation_readings.find_one(
+                {"$and": [reading_filter(cycle), usable, {"timestamp": {operator: bound}}]},
+                {"_id": False, "fermentation_id": False},
+                sort=[("timestamp", direction), ("_id", direction)],
+            )
+        context[key] = edges
+    return {"context": context}

@@ -14,6 +14,7 @@ import {
 } from './fermentations'
 import { capabilityNames } from './thermalDevices'
 import type { Reading } from './readings'
+import type { ChartContext } from './chartCurve'
 import { useLatestRequest } from './useLatestRequest'
 import { measurements, exactMeasurement } from './measurements'
 
@@ -49,6 +50,7 @@ const fermentation = ref<Fermentation | null>(null)
 const notFound = ref(false)
 const readings = ref<Reading[]>([])
 const chartReadings = ref<Reading[]>([])
+const chartContext = ref<ChartContext>({})
 const latestReading = ref<Reading | null>(null)
 const chartAvailable = ref(false)
 const window = ref<[number, number] | null>(null)
@@ -167,7 +169,15 @@ async function load(
         samples.unshift(...page.readings)
         cursor = page.next_before
       } while (cursor)
+      const contextResponse = await fetch(
+        `/api/fermentations/${encodeURIComponent(identifier)}/chart-context?${new URLSearchParams({ from_timestamp: String(selected[0]), to_timestamp: String(selected[1]) })}`,
+        options,
+      )
+      if (!contextResponse.ok) throw new Error('Chart context unavailable')
+      const { context }: { context: ChartContext } =
+        await contextResponse.json()
       return {
+        context,
         missing: false as const,
         detailPayload,
         historyPayload,
@@ -188,6 +198,7 @@ async function load(
       latestReading.value = detailPayload.latest_reading
       readings.value = historyPayload.readings
       chartReadings.value = samples
+      chartContext.value = result.context
       chartAvailable.value = detailPayload.latest_reading !== null
       window.value = selected
       domain.value = bounds
@@ -241,6 +252,7 @@ watch(
       latestReading.value = null
       readings.value = []
       chartReadings.value = []
+      chartContext.value = {}
       chartAvailable.value = false
       domain.value = null
       window.value = null
@@ -378,6 +390,7 @@ watch(
           <MeasurementChart
             v-if="domain && window && chartAvailable"
             :readings="chartReadings"
+            :context="chartContext"
             :range="window"
             @range="selectRange"
           />
@@ -408,7 +421,8 @@ watch(
             "
             role="status"
           >
-            Nessuna lettura nel periodo selezionato.
+            Nessuna lettura nel periodo selezionato. Gli eventuali segmenti
+            collegano acquisizioni esterne all’intervallo.
           </p>
         </div>
         <aside
