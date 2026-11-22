@@ -244,8 +244,9 @@ onMounted(() => {
   chart = new Chart<'line', Point[]>(canvas.value, {
     type: 'line',
     data: {
-      datasets: measurements.map((metric) => ({
+      datasets: measurements.map((metric, index) => ({
         label: metric.label,
+        hidden: !visibility.value[index],
         data: points(metric),
         yAxisID: metric.scale,
         borderColor: metric.color,

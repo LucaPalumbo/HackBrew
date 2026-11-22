@@ -38,12 +38,22 @@ def test_crossing_curve_fills_the_window_with_visible_scales_and_no_synthetic_sa
     base = datetime.fromisoformat(cycle["started_at"]).timestamp() + 1
     for offset, temperature in ((0, 0), (span, 40)):
         api.post(
-            "/telemetry", json=gateway_lettura(timestamp=base + offset, temperature=temperature)
+            "/telemetry",
+            json=gateway_lettura(timestamp=base + offset, temperature=temperature, accel_x=0.5),
         ).raise_for_status()
     page.set_viewport_size({"width": width, "height": 1000})
     page.goto(f"{api.base_url}?fermentation={cycle['id']}")
     chart = page.get_by_role("region", name="Grafico delle misure", exact=True)
     expect(chart.get_by_role("checkbox", checked=True)).to_have_count(2)
+    # Optional series must also be absent from the initial rendered canvas,
+    # before toggling a checkbox can synchronize Chart.js visibility.
+    assert chart.get_by_role("img").evaluate("""canvas => {
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let i = 0; i < pixels.length; i += 4)
+        if (pixels[i] < 40 && pixels[i+1] > 110 && pixels[i+2] > 110 &&
+            pixels[i+3] > 100) return false;
+      return true;
+    }""")
     chart.get_by_role("checkbox", name="Densità SG", exact=True).uncheck()
     select_window(page, base + span / 2 - 10, base + span / 2 + 10)
     canvas = chart.get_by_role("img", name="Grafico a linee: 0 letture", exact=True)
