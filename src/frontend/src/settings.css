@@ -1,0 +1,70 @@
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.settings-card {
+  border: 1px solid #e0e6e9;
+  border-radius: 10px;
+  padding: 28px;
+  background: #fff;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-card h2 {
+  margin-top: 0;
+  font-size: 20px;
+}
+.settings-card p {
+  line-height: 1.7;
+}
+.settings-card .fermentation-form {
+  margin: 24px 0 0;
+}
+.settings-safety {
+  background: #edf4f3;
+  border-color: #d8e7e3;
+}
+.settings-safety dt {
+  margin-top: 24px;
+  font-weight: 650;
+  font-size: 14px;
+}
+.settings-safety dd {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #627580;
+}
+.settings-safety > p:not(.eyebrow) {
+  font-size: 13px;
+  color: #627580;
+}
+.settings-sync {
+  margin-top: 36px;
+}
+.settings-device {
+  margin-top: 18px;
+}
+.settings-device h3 {
+  margin-top: 0;
+}
+.settings-device [role='status'] {
+  color: #215a61;
+  font-weight: 650;
+}
+@media (max-width: 800px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-card {
+    padding: 22px;
+  }
+}
+.settings-device [data-status='pending'] {
+  color: #946025;
+}
+.settings-device [data-status='error'] {
+  color: #a43629;
+}

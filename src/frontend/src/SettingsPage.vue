@@ -18,6 +18,7 @@ const dates = new Intl.DateTimeFormat('it-IT', {
   timeStyle: 'medium',
 })
 let timer: ReturnType<typeof setInterval> | undefined
+let saveController: AbortController | undefined
 
 function accept(payload: GlobalSettings) {
   settings.value = payload
@@ -38,6 +39,7 @@ async function load(background = false) {
   )
 }
 async function save() {
+  if (saving.value) return
   const duration = Number(draft.value)
   saveError.value = ''
   notice.value = ''
@@ -47,33 +49,40 @@ async function save() {
   }
   saving.value = true
   invalidate()
+  saveController = new AbortController()
+  const signal = saveController.signal
   try {
     const response = await fetch('/api/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ communication_timeout_seconds: duration }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
     })
     if (!response.ok) throw new Error('Settings not saved')
     const payload = (await response.json()) as GlobalSettings
+    if (signal.aborted) return
     dirty.value = false
     accept(payload)
     notice.value =
       'Timeout salvato. Lo stato di applicazione ai dispositivi è indicato sotto.'
   } catch {
+    if (signal.aborted) return
     saveError.value =
       'Il salvataggio non è stato confermato. Controlla il collegamento e riprova.'
   } finally {
-    saving.value = false
+    if (!signal.aborted) saving.value = false
   }
 }
 onMounted(() => {
   void load()
   timer = setInterval(() => {
-    if (!saving.value) refresh(() => load(true))
+    if (!saving.value && settings.value) refresh(() => load(true))
   }, 1000)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  saveController?.abort()
+})
 </script>
 
 <template>
@@ -87,83 +96,124 @@ onUnmounted(() => clearInterval(timer))
       </p>
     </div>
   </div>
-  <section class="fermentation-panel" aria-label="Timeout globale">
-    <h2>Timeout di comunicazione</h2>
-    <p>Il valore iniziale è di tre ore: 10.800 secondi.</p>
-    <p class="description">
-      Per le pillole il tempo decorre dall’ultima ricezione dei dati sul server.
-      Per i dispositivi termici decorre dall’ultimo comando di controllo valido.
-      Leggere lo stato o sincronizzare la configurazione non rinnova quel
-      contatto.
-    </p>
-    <p class="metric-caption">
-      Il timeout si applica a tutti i dispositivi associati alle fermentazioni
-      con regolazione termica.
-    </p>
-    <p v-if="loading" role="status">Caricamento impostazioni…</p>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <button
-      v-if="error"
-      class="text-button"
-      :disabled="loading || saving"
-      @click="load()"
-    >
-      Riprova impostazioni
-    </button>
-    <template v-if="settings">
-      <p aria-label="Timeout desiderato">
-        Timeout desiderato:
-        <strong
-          >{{
-            numbers.format(settings.communication_timeout_seconds)
-          }}
-          s</strong
-        >
-        · Revisione {{ settings.revision }}
-      </p>
-      <form class="fermentation-form" @submit.prevent="save">
-        <div>
-          <label for="communication-timeout"
-            >Timeout di comunicazione (secondi)</label
-          >
-          <input
-            id="communication-timeout"
-            v-model="draft"
-            type="number"
-            step="any"
-            required
-            :disabled="saving"
-            @input="dirty = true"
-          />
-        </div>
-        <button class="refresh" type="submit" :disabled="saving || loading">
-          {{ saving ? 'Salvataggio…' : 'Salva timeout' }}
-        </button>
-      </form>
-      <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
-      <p
-        v-if="notice"
-        class="operation-notice"
-        role="status"
-        aria-label="Esito salvataggio"
+  <div class="settings-layout">
+    <section class="settings-card" aria-label="Timeout globale">
+      <h2>Timeout di comunicazione</h2>
+      <p>Il valore iniziale è di tre ore: 10.800 secondi.</p>
+      <p v-if="loading" role="status">Caricamento impostazioni…</p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <button
+        v-if="error"
+        class="text-button"
+        :disabled="loading || saving"
+        @click="load()"
       >
-        {{ notice }}
+        Riprova impostazioni
+      </button>
+      <template v-if="settings">
+        <p aria-label="Timeout desiderato">
+          Timeout desiderato:
+          <strong
+            ><template
+              v-if="settings.communication_timeout_seconds % 3600 === 0"
+              >{{
+                numbers.format(settings.communication_timeout_seconds / 3600)
+              }}
+              {{
+                settings.communication_timeout_seconds === 3600 ? 'ora' : 'ore'
+              }}
+              · </template
+            >{{
+              numbers.format(settings.communication_timeout_seconds)
+            }}
+            s</strong
+          >
+          · Revisione {{ settings.revision }}
+        </p>
+        <form class="fermentation-form" @submit.prevent="save">
+          <div>
+            <label for="communication-timeout"
+              >Timeout di comunicazione (secondi)</label
+            >
+            <input
+              id="communication-timeout"
+              v-model="draft"
+              type="number"
+              step="any"
+              required
+              :disabled="saving"
+              @input="dirty = true"
+            />
+          </div>
+          <button class="refresh" type="submit" :disabled="saving || loading">
+            {{ saving ? 'Salvataggio…' : 'Salva timeout' }}
+          </button>
+        </form>
+        <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
+        <p
+          v-if="notice"
+          class="operation-notice"
+          role="status"
+          aria-label="Esito salvataggio"
+        >
+          {{ notice }}
+        </p>
+      </template>
+    </section>
+    <aside
+      class="settings-card settings-safety"
+      aria-label="Regole di sicurezza"
+    >
+      <p class="eyebrow">Sicurezza e comunicazione</p>
+      <h2>Un timeout, due controlli</h2>
+      <dl>
+        <div>
+          <dt>Ultima lettura ricevuta</dt>
+          <dd>
+            Il server misura il tempo dall’ultima ricezione valida della
+            pillola. Alla scadenza sospende la regolazione e richiede lo
+            spegnimento.
+          </dd>
+        </div>
+        <div>
+          <dt>Ultimo comando valido</dt>
+          <dd>
+            Ogni attuatore misura il tempo dall’ultimo comando di controllo
+            valido. Alla scadenza si spegne autonomamente.
+          </dd>
+        </div>
+      </dl>
+      <p>
+        La durata è la stessa. Leggere lo stato o sincronizzare la
+        configurazione non rinnova questi contatti.
       </p>
-    </template>
-  </section>
-  <section v-if="settings" aria-label="Sincronizzazione dei dispositivi">
+      <p>
+        Modificare il timeout non riaccende un dispositivo e non conclude una
+        fermentazione.
+      </p>
+    </aside>
+  </div>
+  <section
+    v-if="settings"
+    class="settings-sync"
+    aria-label="Sincronizzazione dei dispositivi"
+  >
     <h2>Applicazione ai dispositivi</h2>
+    <p class="description">
+      Il salvataggio conferma il valore richiesto. Solo la risposta del
+      dispositivo conferma la configurazione applicata.
+    </p>
     <p v-if="settings.devices.length === 0">
       Nessun dispositivo termico registrato.
     </p>
     <section
       v-for="device in settings.devices"
       :key="device.id"
-      class="fermentation-panel"
+      class="settings-card settings-device"
       :aria-label="`Sincronizzazione ${device.name}`"
     >
       <h3>{{ device.name }}</h3>
-      <p role="status">
+      <p role="status" :data-status="device.status">
         {{
           device.status === 'confirmed'
             ? 'Sincronizzato'

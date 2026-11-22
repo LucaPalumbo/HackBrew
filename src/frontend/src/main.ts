@@ -6,3 +6,4 @@ import './detail.css'
 import './registry.css'
 
 createApp(App).mount('#app')
+import './settings.css'
