@@ -1,6 +1,6 @@
+import os
 from collections.abc import Iterator
 from datetime import datetime
-import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
