@@ -57,9 +57,9 @@ def test_period_loads_all_pages_and_freezes_until_return_to_live(
     assert float(points.split()[0].split(",")[1]) == 8
     assert float(points.split()[-1].split(",")[1]) == 72
     if directory := os.environ.get("HACKBREW_SCREENSHOT_DIR"):
-        page.get_by_role("region", name="Navigazione temporale").screenshot(
-            path=Path(directory) / f"navigatore-{width}.png"
-        )
+        navigator = page.get_by_role("region", name="Navigazione temporale")
+        navigator.evaluate("element => element.scrollIntoView({block: 'center'})")
+        navigator.screenshot(path=Path(directory) / f"navigatore-{width}.png")
     preview_box = preview.bounding_box()
     chart_box = page.get_by_role(
         "img", name="Grafico a linee: 61 letture", exact=True
@@ -226,9 +226,11 @@ def test_overview_window_moves_without_changing_duration_and_clamps_to_bounds(
     assert float(end.input_value()) == pytest.approx(base + 39600, rel=0, abs=0.00001)
     assert float(end.input_value()) - float(start.input_value()) == pytest.approx(3600)
     expect(page.get_by_text("Intervallo fermo", exact=True)).to_be_visible()
+    expect(page.get_by_text("Caricamento storico…", exact=True)).to_have_count(0)
     selection.scroll_into_view_if_needed()
     box = selection.bounding_box()
     assert box is not None
+    selected_before_touch = page.get_by_label("Intervallo visualizzato").inner_text()
     x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.85
     session = page.context.new_cdp_session(page)
     session.send(
@@ -241,11 +243,13 @@ def test_overview_window_moves_without_changing_duration_and_clamps_to_bounds(
     )
     session.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
     session.detach()
+    expect(page.get_by_label("Intervallo visualizzato")).not_to_have_text(selected_before_touch)
     assert float(end.input_value()) < base + 39600
     assert float(end.input_value()) - float(start.input_value()) == pytest.approx(3600)
     # Both real thumbs share the preview. Move the start thumb with the mouse,
     # independently of the center region and keyboard alternatives.
     page.get_by_role("button", name="Tutto", exact=True).click()
+    expect(page.get_by_role("img", name="Grafico a linee: 12 letture", exact=True)).to_be_visible()
     start.scroll_into_view_if_needed()
     box = start.bounding_box()
     assert box is not None
@@ -335,3 +339,52 @@ def test_late_history_response_does_not_replace_the_newer_period(
     expect(
         page.get_by_role("img", name="Anteprima densità: 12 letture", exact=True)
     ).to_be_visible()
+
+
+@pytest.mark.parametrize("width", [1440, 390])
+def test_nearby_handles_can_both_be_grabbed_with_mouse_and_touch(
+    page: Page, api: httpx.Client, width: int
+) -> None:
+    cycle = api.post(
+        "/api/fermentations", json=fermentation_payload(api, "Maniglie vicine")
+    ).json()["fermentation"]
+    base = datetime.fromisoformat(cycle["started_at"]).timestamp()
+    for offset in (0, 39600):
+        api.post("/telemetry", json=gateway_lettura(timestamp=base + offset)).raise_for_status()
+    page.goto(f"{api.base_url}?fermentation={cycle['id']}")
+    start = page.get_by_label("Inizio intervallo", exact=True)
+    end = page.get_by_label("Fine intervallo", exact=True)
+    start.focus()
+    start.press("End")
+    initial_start = float(start.input_value())
+    start.scroll_into_view_if_needed()
+    box = start.bounding_box()
+    assert box is not None
+    # Both thumbs are at the right edge with just a millisecond between them.
+    x, y = box["x"] + box["width"] - 12, box["y"] + 12
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x - box["width"] * 0.05, y, steps=6)
+    page.mouse.up()
+    assert float(start.input_value()) < initial_start - 1000
+    expect(page.get_by_text("Caricamento storico…", exact=True)).to_have_count(0)
+    previous_start = float(start.input_value())
+    previous_end = float(end.input_value())
+    selected_before_touch = page.get_by_label("Intervallo visualizzato").inner_text()
+    box = end.bounding_box()
+    assert box is not None
+    x, y = box["x"] + box["width"] - 12, box["y"] + box["height"] / 2
+    session = page.context.new_cdp_session(page)
+    session.send(
+        "Input.dispatchTouchEvent",
+        {"type": "touchStart", "touchPoints": [{"x": x, "y": y, "id": 1}]},
+    )
+    session.send(
+        "Input.dispatchTouchEvent",
+        {"type": "touchMove", "touchPoints": [{"x": x - box["width"] * 0.04, "y": y, "id": 1}]},
+    )
+    session.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    session.detach()
+    expect(page.get_by_label("Intervallo visualizzato")).not_to_have_text(selected_before_touch)
+    assert float(start.input_value()) == pytest.approx(previous_start, rel=0, abs=0.00001)
+    assert previous_start < float(end.input_value()) < previous_end - 100

@@ -34,6 +34,7 @@ let drag: {
   start: number
   end: number
   width: number
+  edge: 'start' | 'end' | 'window'
 } | null = null
 function shifted(start: number, end: number): [number, number] {
   const duration = Math.min(end - start, span.value)
@@ -44,19 +45,20 @@ function shifted(start: number, end: number): [number, number] {
   return [left, left + duration]
 }
 function handle(event: Event, edge: 'start' | 'end') {
-  const value = Number((event.target as HTMLInputElement).value)
-  if (edge === 'start')
-    emit(
-      'range',
-      Math.max(props.minimum, Math.min(value, props.end - shortest.value)),
-      props.end,
-    )
-  else
-    emit(
-      'range',
-      props.start,
-      Math.min(props.maximum, Math.max(value, props.start + shortest.value)),
-    )
+  selectEdge(edge, Number((event.target as HTMLInputElement).value))
+}
+function selectEdge(edge: 'start' | 'end', value: number) {
+  emit('range', ...edgeRange(edge, value, props.start, props.end))
+}
+function edgeRange(
+  edge: 'start' | 'end',
+  value: number,
+  start: number,
+  end: number,
+): [number, number] {
+  return edge === 'start'
+    ? [Math.max(props.minimum, Math.min(value, end - shortest.value)), end]
+    : [start, Math.min(props.maximum, Math.max(value, start + shortest.value))]
 }
 function key(event: KeyboardEvent, edge: 'start' | 'end' | 'window') {
   const directions: Record<string, number> = {
@@ -87,21 +89,13 @@ function key(event: KeyboardEvent, edge: 'start' | 'end' | 'window') {
         : event.key === 'End'
           ? props.maximum
           : current + amount
-    if (edge === 'start')
-      emit(
-        'range',
-        Math.max(props.minimum, Math.min(value, props.end - shortest.value)),
-        props.end,
-      )
-    else
-      emit(
-        'range',
-        props.start,
-        Math.min(props.maximum, Math.max(value, props.start + shortest.value)),
-      )
+    selectEdge(edge, value)
   }
 }
-function begin(event: PointerEvent) {
+function begin(
+  event: PointerEvent,
+  edge: 'start' | 'end' | 'window' = 'window',
+) {
   if (event.button !== 0 || !track.value) return
   event.preventDefault()
   const target = event.currentTarget as HTMLElement
@@ -113,12 +107,21 @@ function begin(event: PointerEvent) {
     start: props.start,
     end: props.end,
     width: track.value.getBoundingClientRect().width,
+    edge,
   }
 }
 function move(event: PointerEvent) {
   if (!drag || drag.id !== event.pointerId) return
   const delta = ((event.clientX - drag.x) / (drag.width || 1)) * span.value
-  draft.value = shifted(drag.start + delta, drag.end + delta)
+  draft.value =
+    drag.edge === 'window'
+      ? shifted(drag.start + delta, drag.end + delta)
+      : edgeRange(
+          drag.edge,
+          (drag.edge === 'start' ? drag.start : drag.end) + delta,
+          drag.start,
+          drag.end,
+        )
 }
 function finish(event: PointerEvent) {
   if (!drag || drag.id !== event.pointerId) return
@@ -157,7 +160,10 @@ const densityLine = computed(() => {
 <template>
   <section class="time-navigator" aria-label="Navigazione temporale">
     <p>Densità SG · intera fermentazione</p>
-    <div class="overview">
+    <div
+      class="overview"
+      :class="{ narrow: (end - start) / (maximum - minimum || 1) < 0.2 }"
+    >
       <div ref="track" class="overview-track">
         <svg
           viewBox="0 0 1000 80"
@@ -215,6 +221,11 @@ const densityLine = computed(() => {
           :value="selected[0]"
           @input="handle($event, 'start')"
           @keydown="key($event, 'start')"
+          @pointerdown="begin($event, 'start')"
+          @pointermove="move"
+          @pointerup="finish"
+          @pointercancel="cancel"
+          @lostpointercapture="cancel"
         />
         <input
           type="range"
@@ -227,6 +238,11 @@ const densityLine = computed(() => {
           :value="selected[1]"
           @input="handle($event, 'end')"
           @keydown="key($event, 'end')"
+          @pointerdown="begin($event, 'end')"
+          @pointermove="move"
+          @pointerup="finish"
+          @pointercancel="cancel"
+          @lostpointercapture="cancel"
         />
       </div>
     </div>
@@ -353,6 +369,7 @@ input[type='range'] {
   appearance: none;
   background: transparent;
   pointer-events: none;
+  touch-action: none;
 }
 input[type='range']::-webkit-slider-thumb {
   appearance: none;
@@ -389,5 +406,24 @@ input[type='range']:focus-visible::-moz-range-thumb {
 .navigator-help {
   font-size: 0.8rem;
   color: #52695c;
+}
+.overview.narrow {
+  height: 136px;
+}
+.narrow .overview-track,
+.narrow .selected-window {
+  height: 112px;
+}
+.narrow input[type='range'] {
+  height: 44px;
+}
+.narrow input[type='range']:last-of-type {
+  top: 44px;
+}
+.narrow input[type='range']::-webkit-slider-thumb {
+  height: 44px;
+}
+.narrow input[type='range']::-moz-range-thumb {
+  height: 40px;
 }
 </style>
