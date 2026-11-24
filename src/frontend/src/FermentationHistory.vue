@@ -50,6 +50,7 @@ const fermentation = ref<Fermentation | null>(null)
 const notFound = ref(false)
 const readings = ref<Reading[]>([])
 const chartReadings = ref<Reading[]>([])
+const overviewReadings = ref<Reading[]>([])
 const chartContext = ref<ChartContext>({})
 const latestReading = ref<Reading | null>(null)
 const chartAvailable = ref(false)
@@ -155,8 +156,8 @@ async function load(
       do {
         const period = new URLSearchParams({
           limit: '200',
-          from_timestamp: String(selected[0]),
-          to_timestamp: String(selected[1]),
+          from_timestamp: String(first),
+          to_timestamp: String(last),
         })
         if (cursor) period.set('before', cursor)
         const response = await fetch(
@@ -197,7 +198,11 @@ async function load(
       fermentation.value = detailPayload.fermentation
       latestReading.value = detailPayload.latest_reading
       readings.value = historyPayload.readings
-      chartReadings.value = samples
+      overviewReadings.value = samples
+      chartReadings.value = samples.filter(
+        (reading) =>
+          reading.timestamp >= selected[0] && reading.timestamp <= selected[1],
+      )
       chartContext.value = result.context
       chartAvailable.value = detailPayload.latest_reading !== null
       window.value = selected
@@ -252,6 +257,7 @@ watch(
       latestReading.value = null
       readings.value = []
       chartReadings.value = []
+      overviewReadings.value = []
       chartContext.value = {}
       chartAvailable.value = false
       domain.value = null
@@ -383,6 +389,7 @@ watch(
             :start="window[0]"
             :end="window[1]"
             :following="following"
+            :readings="overviewReadings"
             @range="selectRange"
             @preset="preset"
             @live="backToLive"

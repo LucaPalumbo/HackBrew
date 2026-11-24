@@ -23,7 +23,7 @@ def test_active_charts_and_table_update_with_real_letture(
         == 200
     )
     expect(page.get_by_role("img", name="Grafico a linee: 1 lettura")).to_be_visible()
-    expect(page.get_by_role("img")).to_have_count(1)
+    expect(page.get_by_role("img", name="Grafico a linee:", exact=False)).to_have_count(1)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("cell", name="1.050125", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="19,6875", exact=True)).to_be_visible()
