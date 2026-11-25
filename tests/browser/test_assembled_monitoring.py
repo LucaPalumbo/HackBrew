@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.assembled_system import AssembledSystem, FrozenHistory
+from tests.browser.navigation import close_raw_readings
 
 
 @pytest.fixture
@@ -47,5 +48,6 @@ def test_independent_cycles_keep_frozen_history_across_network_reconnections(
             overview.get_by_role("button", name="Apri IPA integrata", exact=False)
         ).to_contain_text("14,9 °C", timeout=15000)
         view.assert_preserved()
+        close_raw_readings(page)
         page.get_by_role("button", name="Torna al live", exact=True).click()
         expect(page.get_by_label("Intervallo visualizzato")).not_to_have_text(view.interval)

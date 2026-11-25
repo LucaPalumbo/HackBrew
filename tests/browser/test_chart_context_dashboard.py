@@ -8,6 +8,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import open_raw_readings
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -156,8 +157,7 @@ def test_each_optional_curve_uses_usable_context_across_invalid_rows(
             arg={"canvas": canvas.element_handle(), "kind": kind},
         )
         checkbox.uncheck()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("row")).to_have_count(2)
-    expect(
-        table.get_by_role("cell", name="Non disponibile (velocità non valida)", exact=True)
-    ).to_be_visible()
+    expect(table.get_by_role("cell", name="Non valida", exact=True)).to_be_visible()

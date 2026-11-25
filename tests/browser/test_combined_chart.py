@@ -8,6 +8,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import close_raw_readings, open_raw_readings
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -54,19 +55,23 @@ def test_one_chart_exposes_seven_series_and_exact_values(
         else:
             expect(checkbox).not_to_be_checked()
             checkbox.check()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
-    expect(table.get_by_role("columnheader")).to_have_count(8)
+    expect(table.get_by_role("columnheader")).to_have_count(12)
     for value in ("1.050125", "19,6875", "63,2734375", "-2,125", "-1,25", "0,75", "2,5"):
         expect(table.get_by_role("cell", name=value, exact=True)).to_be_visible()
+    close_raw_readings(page)
     if width == 390:
         temperature_toggle = legend.get_by_role("checkbox", name="Temperatura °C", exact=True)
         temperature_toggle.uncheck()
         expect(chart.get_by_label("Scala graduata", exact=True)).to_have_value("density")
         temperature_toggle.check()
+        open_raw_readings(page)
         scroller = page.get_by_label("Scorri le letture storiche", exact=True)
         scroller.focus()
         scroller.press("ArrowRight")
         page.wait_for_function("element => element.scrollLeft > 0", arg=scroller.element_handle())
+        close_raw_readings(page)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
 
@@ -139,9 +144,11 @@ def test_sparse_samples_are_connected_by_a_visible_line_and_legend_controls_it(
     expect(tooltip).to_contain_text("°C")
     chart.get_by_role("checkbox", name="Temperatura °C", exact=True).uncheck()
     expect(chart.get_by_text("Nessuna serie selezionata.", exact=False)).to_be_visible()
+    open_raw_readings(page)
     expect(
         page.get_by_role("table", name="Letture della fermentazione").get_by_role("row")
     ).to_have_count(3)
+    close_raw_readings(page)
     temperature_toggle = chart.get_by_role("checkbox", name="Temperatura °C", exact=True)
     temperature_toggle.focus()
     temperature_toggle.press("Space")
@@ -173,24 +180,27 @@ def test_missing_optional_values_and_invalid_velocity_do_not_hide_other_measurem
         accel_z=2.75,
     )
     api.post("/telemetry", json=first).raise_for_status()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     row = table.get_by_role("row").nth(1)
-    expect(
-        row.get_by_role("cell", name="Non disponibile (velocità non valida)", exact=True)
-    ).to_be_visible()
+    expect(row.get_by_role("cell", name="Non valida", exact=True)).to_be_visible()
     expect(row.get_by_role("cell", name="18,125", exact=True)).to_be_visible()
     expect(row.get_by_role("cell", name="-1,125", exact=True)).to_be_visible()
-    expect(row.get_by_role("cell", name="-99,5", exact=True)).to_have_count(0)
+    expect(row.get_by_role("cell", name="-99,5", exact=True)).to_be_visible()
+    close_raw_readings(page)
     optional = gateway_lettura(timestamp=base + 1, specific_gravity=1042.125, battery=0)
     for field in ("valid", "gravity_velocity", "accel_x", "accel_y", "accel_z"):
         del optional[field]
     api.post("/telemetry", json=optional).raise_for_status()
+    expect(page.get_by_role("img", name="Grafico a linee: 2 letture", exact=True)).to_be_visible()
+    open_raw_readings(page)
     expect(table.get_by_role("row")).to_have_count(3)
     missing = table.get_by_role("row").nth(2)
     expect(missing.get_by_role("cell", name="Non disponibile", exact=True)).to_have_count(4)
     expect(missing.get_by_role("cell", name="0", exact=True)).to_have_count(1)
     expect(missing.get_by_role("cell", name="1.042125", exact=True)).to_be_visible()
     page.reload()
+    open_raw_readings(page)
     expect(table.get_by_role("row")).to_have_count(3)
 
 
@@ -233,9 +243,11 @@ def test_live_chart_preserves_selected_series_and_separates_parallel_sources(
     ).raise_for_status()
     expect(chart.get_by_role("img", name="Grafico a linee: 2 letture", exact=True)).to_be_visible()
     expect(density).not_to_be_checked()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("cell", name="999", exact=True)).to_have_count(0)
     expect(table.get_by_role("cell", name="-0,75", exact=True)).to_be_visible()
+    close_raw_readings(page)
     # Equal acquisition timestamps stay distinct; the delayed sample is inserted in order.
     for gravity, x in ((1045.25, -0.5), (1046.125, -0.625)):
         api.post(
@@ -244,6 +256,8 @@ def test_live_chart_preserves_selected_series_and_separates_parallel_sources(
                 timestamp=base + 1, specific_gravity=gravity, valid=True, accel_x=x
             ),
         ).raise_for_status()
+    expect(chart.get_by_role("img", name="Grafico a linee: 4 letture", exact=True)).to_be_visible()
+    open_raw_readings(page)
     expect(table.get_by_role("row")).to_have_count(5)
     for index, displayed_gravity in enumerate(
         ("1.050125", "1.04525", "1.046125", "1.040125"), start=1
@@ -253,6 +267,7 @@ def test_live_chart_preserves_selected_series_and_separates_parallel_sources(
             .nth(index)
             .get_by_role("cell", name=displayed_gravity, exact=True)
         ).to_be_visible()
+    close_raw_readings(page)
     expect(density).not_to_be_checked()
     assert page.url.endswith("fermentation=" + first["id"])
 

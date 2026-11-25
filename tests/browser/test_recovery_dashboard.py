@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import httpx
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import open_raw_readings
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -36,6 +37,7 @@ def test_selected_history_recovers_automatically_after_a_failed_load_and_reconne
     expect(
         page.get_by_role("heading", name="Storico: Storico da recuperare", exact=True)
     ).to_be_visible()
+    open_raw_readings(page)
     expect(
         page.get_by_role("table", name="Letture della fermentazione").get_by_role(
             "cell", name="1.060", exact=True

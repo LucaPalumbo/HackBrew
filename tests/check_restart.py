@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 from playwright.sync_api import expect, sync_playwright
 
+from tests.browser.navigation import open_raw_readings
 from tests.database import arrange_single_active_index, reset_test_database
 from tests.fermentations import assert_single_concurrent_start
 from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
@@ -243,10 +244,12 @@ def verify(api: httpx.Client, expected: dict[str, Any]) -> None:
             page.get_by_role("heading", name="Storico: Persistenza conclusa", exact=True)
         ).to_be_visible()
         expect(page.get_by_role("img", name="Grafico a linee: 1 lettura")).to_be_visible()
+        open_raw_readings(page)
         table = page.get_by_role("table", name="Letture della fermentazione")
         expect(table.get_by_role("cell", name="1.040125", exact=True)).to_be_visible()
         expect(table.get_by_role("cell", name="63,2734375", exact=True)).to_be_visible()
         page.reload()
+        open_raw_readings(page)
         expect(
             page.get_by_role("heading", name="Storico: Persistenza conclusa", exact=True)
         ).to_be_visible()

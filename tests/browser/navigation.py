@@ -1,7 +1,7 @@
 """Open public destinations after the dashboard was split into focused pages."""
 
 import httpx
-from playwright.sync_api import Page
+from playwright.sync_api import Locator, Page, expect
 
 
 def open_active_fermentation(page: Page, api: httpx.Client) -> None:
@@ -12,7 +12,24 @@ def open_active_fermentation(page: Page, api: httpx.Client) -> None:
 
 
 def show_management(page: Page) -> None:
+    close_raw_readings(page)
     page.get_by_role("tab", name="Gestione", exact=True).click()
+
+
+def open_raw_readings(page: Page) -> Locator:
+    dialog = page.get_by_role("dialog", name="Dati grezzi", exact=True)
+    if not dialog.is_visible():
+        page.get_by_role("button", name="Dati grezzi", exact=True).click()
+    expect(dialog).to_be_visible()
+    expect(dialog.get_by_text("Caricamento dati grezzi…", exact=True)).to_have_count(0)
+    return dialog
+
+
+def close_raw_readings(page: Page) -> None:
+    dialog = page.get_by_role("dialog", name="Dati grezzi", exact=True)
+    if dialog.is_visible():
+        dialog.get_by_role("button", name="Chiudi dati grezzi", exact=True).click()
+        expect(dialog).to_have_count(0)
 
 
 def finish_fermentation(page: Page) -> None:

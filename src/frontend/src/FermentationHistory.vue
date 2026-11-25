@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import MeasurementChart from './MeasurementChart.vue'
+import RawReadings from './RawReadings.vue'
 import ReadingSummary from './ReadingSummary.vue'
 import TimeNavigator from './TimeNavigator.vue'
 import FermentationControls from './FermentationControls.vue'
@@ -16,7 +17,6 @@ import { capabilityNames } from './thermalDevices'
 import type { Reading } from './readings'
 import type { ChartContext } from './chartCurve'
 import { useLatestRequest } from './useLatestRequest'
-import { measurements, exactMeasurement } from './measurements'
 
 const props = defineProps<{
   identifier: string | null
@@ -48,7 +48,6 @@ const notice = ref('')
 const detailSection = ref<HTMLElement | null>(null)
 const fermentation = ref<Fermentation | null>(null)
 const notFound = ref(false)
-const readings = ref<Reading[]>([])
 const chartReadings = ref<Reading[]>([])
 const overviewReadings = ref<Reading[]>([])
 const chartContext = ref<ChartContext>({})
@@ -65,8 +64,7 @@ function selectRange(start: number, end: number) {
   const left = Math.max(low, Math.min(start, high - width))
   window.value = [left, left + width]
   following.value = false
-  cursors.value = [null]
-  void load(null, 'refresh')
+  void load()
 }
 function preset(hours: number | null) {
   if (!domain.value) return
@@ -78,45 +76,43 @@ function preset(hours: number | null) {
 function backToLive() {
   liveWidth = window.value ? window.value[1] - window.value[0] : null
   following.value = true
-  cursors.value = [null]
-  void load(null, 'refresh')
+  void load()
 }
-const nextBefore = ref<string | null>(null)
-const cursors = ref<Array<string | null>>([null])
 const { loading, error, run, invalidate, refresh } = useLatestRequest(
   'Non è stato possibile recuperare lo storico. Riprova.',
 )
-const latest = computed(() => readings.value.at(-1))
 const dates = new Intl.DateTimeFormat('it-IT', {
   dateStyle: 'medium',
   timeStyle: 'medium',
 })
-const temperatures = new Intl.NumberFormat('it-IT', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-})
 let loadedId: string | null = null
 let loadedLive = props.live
-let requestedBefore: string | null = null
-let requestedDirection: 'refresh' | 'older' | 'newer' = 'refresh'
+const rawButton = ref<HTMLButtonElement>()
+const rawSession = ref<{
+  identifier: string
+  name: string
+  range: [number, number]
+  bounds: [number, number]
+} | null>(null)
+function openRaw() {
+  if (!props.identifier || !window.value || !domain.value) return
+  rawSession.value = {
+    identifier: props.identifier,
+    name: fermentation.value?.name ?? 'Fermentazione',
+    range: [...window.value],
+    bounds: [...domain.value],
+  }
+}
+function closeRaw() {
+  rawSession.value = null
+  void nextTick(() => rawButton.value?.focus())
+}
 
-async function load(
-  before: string | null = requestedBefore,
-  direction: 'refresh' | 'older' | 'newer' = requestedDirection,
-  background = false,
-): Promise<boolean> {
+async function load(background = false): Promise<boolean> {
   const identifier = props.identifier
   if (!identifier) return false
-  requestedBefore = before
-  requestedDirection = direction
   return run(
     async (signal) => {
-      const query = new URLSearchParams({ limit: '200' })
-      if (!following.value && window.value) {
-        query.set('from_timestamp', String(window.value[0]))
-        query.set('to_timestamp', String(window.value[1]))
-      }
-      if (before) query.set('before', before)
       const options = {
         cache: 'no-store' as const,
         signal,
@@ -140,17 +136,6 @@ async function load(
       const selected: [number, number] = following.value
         ? [liveWidth === null ? first : Math.max(first, last - liveWidth), last]
         : (window.value ?? [first, last])
-      query.set('from_timestamp', String(selected[0]))
-      query.set('to_timestamp', String(selected[1]))
-      const history = await fetch(
-        `/api/fermentations/${encodeURIComponent(identifier)}/readings?${query}`,
-        options,
-      )
-      if (!history.ok) throw new Error('History unavailable')
-      const historyPayload: {
-        readings: Reading[]
-        next_before: string | null
-      } = await history.json()
       const samples: Reading[] = []
       let cursor: string | null = null
       do {
@@ -181,7 +166,6 @@ async function load(
         context,
         missing: false as const,
         detailPayload,
-        historyPayload,
         samples,
         selected,
         bounds: [first, last] as [number, number],
@@ -193,11 +177,9 @@ async function load(
         fermentation.value = null
         return
       }
-      const { detailPayload, historyPayload, samples, selected, bounds } =
-        result
+      const { detailPayload, samples, selected, bounds } = result
       fermentation.value = detailPayload.fermentation
       latestReading.value = detailPayload.latest_reading
-      readings.value = historyPayload.readings
       overviewReadings.value = samples
       chartReadings.value = samples.filter(
         (reading) =>
@@ -207,23 +189,9 @@ async function load(
       chartAvailable.value = detailPayload.latest_reading !== null
       window.value = selected
       domain.value = bounds
-      nextBefore.value = historyPayload.next_before
-      if (direction === 'older') cursors.value.push(before)
-      if (direction === 'newer') cursors.value.pop()
-      requestedDirection = 'refresh'
     },
     background,
   )
-}
-function older() {
-  following.value = false
-  const cursor = nextBefore.value
-  if (cursor) void load(cursor, 'older')
-}
-function newer() {
-  following.value = false
-  if (cursors.value.length > 1)
-    void load(cursors.value[cursors.value.length - 2], 'newer')
 }
 function ended(updated: Fermentation) {
   fermentation.value = updated
@@ -251,11 +219,11 @@ watch(
     loadedLive = live
     if (changed) {
       invalidate()
+      rawSession.value = null
       loadedId = identifier
       fermentation.value = null
       notFound.value = false
       latestReading.value = null
-      readings.value = []
       chartReadings.value = []
       overviewReadings.value = []
       chartContext.value = {}
@@ -264,10 +232,6 @@ watch(
       window.value = null
       following.value = true
       liveWidth = null
-      nextBefore.value = null
-      cursors.value = [null]
-      requestedBefore = null
-      requestedDirection = 'refresh'
       error.value = ''
       notice.value = ''
     }
@@ -278,8 +242,7 @@ watch(
       })
     if (identifier) {
       if (changed || viewChanged) void load()
-      else if (!notFound.value)
-        refresh(() => load(requestedBefore, requestedDirection, true))
+      else if (!notFound.value) refresh(() => load(true))
     }
   },
   { immediate: true },
@@ -381,6 +344,15 @@ watch(
           <div class="detail-chart-heading">
             <p class="eyebrow">L'evoluzione della birra</p>
             <h2>Andamento</h2>
+            <button
+              ref="rawButton"
+              type="button"
+              class="text-button"
+              :disabled="!window || !domain"
+              @click="openRaw"
+            >
+              Dati grezzi
+            </button>
           </div>
           <TimeNavigator
             v-if="domain && window && chartAvailable"
@@ -455,87 +427,6 @@ watch(
             </template>
           </div>
         </aside>
-        <div class="detail-readings">
-          <template v-if="readings.length">
-            <p
-              v-if="!live && latest"
-              class="history-summary"
-              aria-label="Riepilogo storico"
-            >
-              Ultima lettura mostrata:
-              {{ latest.specific_gravity.toFixed(3) }} SG ·
-              {{ temperatures.format(latest.temperature) }} °C ·
-              {{ latest.battery.toFixed(0) }}% batteria
-            </p>
-            <p class="history-period">
-              Le linee collegano le letture disponibili, anche distanti nel
-              tempo. Ogni punto è un campione acquisito; nessun valore
-              intermedio viene aggiunto alle letture.
-            </p>
-            <div class="history-navigation">
-              <button
-                class="text-button"
-                type="button"
-                :disabled="loading || cursors.length === 1"
-                @click="newer"
-              >
-                Letture più recenti
-              </button>
-              <span>{{ readings.length }} letture mostrate</span>
-              <button
-                class="text-button"
-                type="button"
-                :disabled="loading || !nextBefore"
-                @click="older"
-              >
-                Letture precedenti
-              </button>
-            </div>
-            <div
-              class="readings-table"
-              tabindex="0"
-              aria-label="Scorri le letture storiche"
-            >
-              <table aria-label="Letture della fermentazione">
-                <thead>
-                  <tr>
-                    <th scope="col">Acquisizione</th>
-                    <th
-                      v-for="metric in measurements"
-                      :key="metric.key"
-                      scope="col"
-                    >
-                      {{ metric.label }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="(reading, index) in readings"
-                    :key="`${reading.timestamp}-${index}`"
-                  >
-                    <td>
-                      <time
-                        :datetime="
-                          new Date(reading.timestamp * 1000).toISOString()
-                        "
-                        >{{
-                          dates.format(new Date(reading.timestamp * 1000))
-                        }}</time
-                      >
-                      <span class="exact-timestamp"
-                        >Unix: {{ reading.timestamp }}</span
-                      >
-                    </td>
-                    <td v-for="metric in measurements" :key="metric.key">
-                      {{ exactMeasurement(reading, metric.key) }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </template>
-        </div>
       </div>
       <div
         v-show="tab === 'management'"
@@ -598,6 +489,14 @@ watch(
           <ThermalRegulationStatus :fermentation="fermentation"
         /></template>
       </div>
+      <RawReadings
+        v-if="rawSession"
+        :identifier="rawSession.identifier"
+        :fermentation-name="rawSession.name"
+        :range="rawSession.range"
+        :bounds="rawSession.bounds"
+        @close="closeRaw"
+      />
     </template>
   </section>
 </template>

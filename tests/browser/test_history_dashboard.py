@@ -4,7 +4,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.navigation import open_active_fermentation
+from tests.browser.navigation import close_raw_readings, open_active_fermentation, open_raw_readings
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -24,11 +24,13 @@ def test_active_charts_and_table_update_with_real_letture(
     )
     expect(page.get_by_role("img", name="Grafico a linee: 1 lettura")).to_be_visible()
     expect(page.get_by_role("img", name="Grafico a linee:", exact=False)).to_have_count(1)
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("cell", name="1.050125", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="19,6875", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="63,2734375", exact=True)).to_be_visible()
 
+    close_raw_readings(page)
     assert (
         api.post(
             "/telemetry",
@@ -42,6 +44,7 @@ def test_active_charts_and_table_update_with_real_letture(
         == 200
     )
     expect(page.get_by_role("img", name="Grafico a linee: 2 letture")).to_be_visible()
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.040125", exact=True)).to_be_visible()
     expect(table.get_by_role("row")).to_have_count(3)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
@@ -87,6 +90,7 @@ def test_selected_concluded_history_stays_separate_from_new_live_data_and_surviv
     page.goto(str(api.base_url) + "?page=archive")
     page.get_by_role("button", name="Apri Prima IPA").click()
     expect(page.get_by_role("heading", name="Storico: Prima IPA", exact=True)).to_be_visible()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("cell", name="1.060", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="18,0", exact=True)).to_be_visible()
@@ -103,12 +107,15 @@ def test_selected_concluded_history_stays_separate_from_new_live_data_and_surviv
     expect(page.get_by_role("heading", name="Storico: Prima IPA", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="1.060", exact=True)).to_be_visible()
     page.reload()
+    open_raw_readings(page)
     expect(page.get_by_role("heading", name="Storico: Prima IPA", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="1.060", exact=True)).to_be_visible()
 
+    close_raw_readings(page)
     page.get_by_role("navigation").get_by_role("link", name="Archivio", exact=True).click()
     page.get_by_role("button", name="Apri Seconda stout").click()
     expect(page.get_by_role("heading", name="Storico: Seconda stout", exact=True)).to_be_visible()
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="60", exact=True)).to_be_visible()
     page.go_back()

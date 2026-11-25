@@ -8,6 +8,7 @@ import httpx
 import pytest
 from playwright.sync_api import APIResponse, Browser, Page, Route, expect
 
+from tests.browser.navigation import close_raw_readings, open_raw_readings
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -44,11 +45,13 @@ def test_period_loads_all_pages_and_freezes_until_return_to_live(
         timeout=15000
     )
     page.get_by_label("Batteria %", exact=True).uncheck()
+    open_raw_readings(page)
     for rows in (201, 6):
         page.get_by_role("button", name="Letture precedenti", exact=True).click()
         expect(
             page.get_by_role("table", name="Letture della fermentazione").get_by_role("row")
         ).to_have_count(rows)
+    close_raw_readings(page)
     page.get_by_role("button", name="1h", exact=True).click()
     preview = page.get_by_role("img", name="Anteprima densità: 405 letture", exact=True)
     expect(preview).to_be_visible()
@@ -67,7 +70,9 @@ def test_period_loads_all_pages_and_freezes_until_return_to_live(
     assert preview_box is not None and chart_box is not None
     assert preview_box["y"] < chart_box["y"]
     assert preview_box["width"] > chart_box["width"] * 0.85
+    open_raw_readings(page)
     expect(page.get_by_role("button", name="Letture più recenti", exact=True)).to_be_disabled()
+    close_raw_readings(page)
     expect(page.get_by_label("Batteria %", exact=True)).not_to_be_checked()
     expect(page.get_by_role("img", name="Grafico a linee: 61 letture", exact=True)).to_be_visible()
     selected = page.get_by_label("Intervallo visualizzato").inner_text()
