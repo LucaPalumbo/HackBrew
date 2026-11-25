@@ -4,7 +4,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.navigation import open_active_fermentation
+from tests.browser.navigation import close_raw_readings, open_active_fermentation, open_raw_readings
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -27,12 +27,16 @@ def test_delayed_samples_enrich_history_without_replacing_current_values(
     open_active_fermentation(page, api)
     density = page.get_by_role("region", name="Densità")
     expect(density.get_by_text("1.040", exact=True)).to_be_visible()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("row")).to_have_count(2)
 
+    close_raw_readings(page)
     older = gateway_lettura(timestamp=second_start + 0.000123, specific_gravity=1050)
     for _ in range(2):
         assert api.post("/telemetry", json=older).status_code == 200
+    expect(page.get_by_role("img", name="Grafico a linee: 2 letture", exact=True)).to_be_visible()
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
     expect(table.get_by_role("row")).to_have_count(3)
     expect(density.get_by_text("1.040", exact=True)).to_be_visible()
@@ -54,8 +58,10 @@ def test_delayed_samples_enrich_history_without_replacing_current_values(
         )
     expect(density.get_by_text("1.040", exact=True)).to_be_visible()
     expect(table.get_by_role("cell", name="1.060", exact=True)).to_have_count(0)
+    close_raw_readings(page)
     page.get_by_role("navigation").get_by_role("link", name="Archivio", exact=True).click()
     page.get_by_role("button", name="Apri Prima IPA").click()
+    open_raw_readings(page)
     expect(table.get_by_role("row")).to_have_count(2)
     expect(table.get_by_role("cell", name="1.060", exact=True)).to_be_visible()
     open_active_fermentation(page, api)

@@ -6,6 +6,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import open_raw_readings
 from tests.payloads import gateway_lettura
 
 
@@ -75,6 +76,7 @@ def test_home_cards_follow_each_pillola_and_open_an_isolated_detail(
         page.screenshot(path=path / f"home-navigation-{width}.png", full_page=True)
     first.click()
     expect(page).to_have_url(str(api.base_url).rstrip("/") + "/?fermentation=" + cycles[0]["id"])
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
     api.post(
@@ -87,6 +89,7 @@ def test_home_cards_follow_each_pillola_and_open_an_isolated_detail(
     ).raise_for_status()
     expect(table.get_by_role("cell", name="1.020", exact=True)).to_have_count(0)
     page.reload()
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
     page.go_back()
     expect(second).to_contain_text("1.020")

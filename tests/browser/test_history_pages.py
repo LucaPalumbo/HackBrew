@@ -3,6 +3,7 @@ from datetime import datetime
 import httpx
 from playwright.sync_api import Page, expect
 
+from tests.browser.navigation import open_raw_readings
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -24,6 +25,7 @@ def test_phone_can_page_through_all_original_letture(page: Page, api: httpx.Clie
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(str(api.base_url))
     page.get_by_role("button", name="Apri IPA lunga").click()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(page.get_by_role("img", name="Grafico a linee: 205 letture")).to_be_visible()
     expect(table.get_by_role("row")).to_have_count(201)

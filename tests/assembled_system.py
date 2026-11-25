@@ -9,6 +9,7 @@ from playwright.sync_api import Page, expect
 
 from tests.bridge_process import BridgeProcess, advertisement_fixture
 from tests.bridge_proxy import BridgeProxy
+from tests.browser.navigation import open_raw_readings
 from tests.heating import wait_regulation
 from tests.settings import wait_for_sync
 from tests.thermal import observed_actuator, thermal_simulator
@@ -190,6 +191,7 @@ class FrozenHistory:
         page.get_by_label("Batteria %", exact=True).uncheck()
         expect(page.get_by_text("Caricamento storico…", exact=True)).to_have_count(0)
         self.interval = page.get_by_label("Intervallo visualizzato").inner_text()
+        open_raw_readings(page)
         self.table = page.get_by_role("table", name="Letture della fermentazione")
         expect(self.table.get_by_role("row")).to_have_count(3 if key == "ipa" else 2)
         rows = self.table.text_content()
@@ -203,6 +205,7 @@ class FrozenHistory:
         self.assert_preserved()
 
     def assert_preserved(self) -> None:
+        open_raw_readings(self.page)
         expect(self.page.get_by_label("Intervallo visualizzato")).to_have_text(self.interval)
         expect(self.table).to_have_text(self.rows)
         assert (

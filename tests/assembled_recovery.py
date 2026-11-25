@@ -11,7 +11,7 @@ import httpx
 from playwright.sync_api import Browser, Page, expect
 
 from tests.assembled_system import AssembledSystem, FrozenHistory
-from tests.browser.navigation import finish_fermentation, show_management
+from tests.browser.navigation import close_raw_readings, finish_fermentation, show_management
 from tests.database import reset_test_database
 from tests.heating import wait_regulation
 from tests.heating_recovery import wait_device
@@ -290,6 +290,7 @@ def verify_assembled_recovery(
         expect(
             mobile.get_by_role("heading", name="Storico: Lager integrata", exact=True)
         ).to_be_visible()
+        close_raw_readings(desktop)
         desktop.get_by_role("button", name="Torna al live", exact=True).click()
         expect(desktop.get_by_label("Intervallo visualizzato")).not_to_have_text(ipa.interval)
         finish_fermentation(desktop)

@@ -10,7 +10,7 @@ import httpx
 from playwright.sync_api import Page, expect, sync_playwright
 
 from tests.assembled_recovery import verify_assembled_recovery
-from tests.browser.navigation import finish_fermentation
+from tests.browser.navigation import finish_fermentation, open_raw_readings
 from tests.database import reset_test_database
 from tests.heating_recovery import verify_heating_recovery
 from tests.payloads import fermentation_payload, gateway_lettura, register_test_pill
@@ -179,6 +179,7 @@ def verify_database_outage(
     expect(
         archive.get_by_role("heading", name="Storico: Storico recupero", exact=True)
     ).to_be_visible(timeout=20000)
+    open_raw_readings(archive)
     expect(
         archive.get_by_role("table", name="Letture della fermentazione").get_by_role(
             "cell", name="1.060125", exact=True

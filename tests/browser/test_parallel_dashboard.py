@@ -10,7 +10,12 @@ import pytest
 from playwright.sync_api import APIResponse, Page, Route, expect
 from playwright.sync_api import Error as PlaywrightError
 
-from tests.browser.navigation import finish_fermentation, show_management
+from tests.browser.navigation import (
+    close_raw_readings,
+    finish_fermentation,
+    open_raw_readings,
+    show_management,
+)
 from tests.payloads import fermentation_payload, gateway_lettura
 
 
@@ -70,9 +75,11 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
     )
     expect(page).to_have_url(re.compile("fermentation=" + first["id"]))
     expect(page.get_by_role("region", name="Dati della fermentazione")).to_be_focused()
+    open_raw_readings(page)
     table = page.get_by_role("table", name="Letture della fermentazione")
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
     page.reload()
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
     overview_page = page.context.new_page()
     overview_page.goto(str(api.base_url))
@@ -80,8 +87,10 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
     first_card = overview.get_by_role("button", name=re.compile("^Apri IPA parallela"))
     second_card = overview.get_by_role("button", name=re.compile("^Apri Stout parallela"))
     page.goto(f"{str(api.base_url).rstrip('/')}/?fermentation={second['id']}")
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.040", exact=True)).to_be_visible()
     page.go_back()
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.050", exact=True)).to_be_visible()
     assert (
         api.post(
@@ -108,6 +117,9 @@ def test_create_parallel_cycles_open_live_details_and_end_only_selected_cycle(
         ).status_code
         == 200
     )
+    close_raw_readings(page)
+    expect(page.get_by_role("img", name="Grafico a linee: 2 letture", exact=True)).to_be_visible()
+    open_raw_readings(page)
     expect(table.get_by_role("cell", name="1.030", exact=True)).to_be_visible()
     if directory := os.environ.get("HACKBREW_SCREENSHOT_DIR"):
         path = Path(directory)
@@ -187,6 +199,7 @@ def test_delayed_reading_updates_concluded_detail_without_reopening_it(
         ).status_code
         == 200
     )
+    open_raw_readings(page)
     expect(
         page.get_by_role("table", name="Letture della fermentazione").get_by_role(
             "cell", name="1.060", exact=True
@@ -243,6 +256,10 @@ def test_frequent_live_updates_do_not_cancel_slow_cards_and_detail_loads_forever
                 route.fulfill(response=response)
             pending.remove((route, response))
         expect(page.get_by_role("region", name="Densità")).to_contain_text("1.030")
+        expect(
+            page.get_by_role("img", name="Grafico a linee: 3 letture", exact=True)
+        ).to_be_visible()
+        open_raw_readings(page)
         table = page.get_by_role("table", name="Letture della fermentazione")
         expect(table.get_by_role("cell", name="1.030", exact=True)).to_be_visible()
         show_management(page)
