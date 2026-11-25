@@ -78,21 +78,34 @@ def test_scope_and_pagination_preserve_the_graph_selection(
     dialog.get_by_role("combobox", name="Ambito dei dati").select_option("all")
     expect(table.get_by_role("row")).to_have_count(201)
 
+    failed_pages: list[Route] = []
+
     def fail_page(route: Route) -> None:
         if "before=" in route.request.url:
-            route.fulfill(status=503, json={"detail": "Unavailable"})
+            failed_pages.append(route)
         else:
             route.continue_()
 
     page.route("**/api/fermentations/*/readings?*", fail_page)
-    dialog.get_by_role("button", name="Letture precedenti", exact=True).click()
+    with page.expect_request(
+        lambda request: "/readings?" in request.url and "before=" in request.url
+    ):
+        dialog.get_by_role("button", name="Letture precedenti", exact=True).click()
+    expect(dialog.get_by_text("Caricamento dati grezzi…", exact=True)).to_be_visible()
+    assert dialog.evaluate("element => element.contains(document.activeElement)")
+    page.keyboard.press("Shift+Tab")
+    assert dialog.evaluate("element => element.contains(document.activeElement)")
+    assert failed_pages
+    failed_pages[0].fulfill(status=503, json={"detail": "Unavailable"})
     expect(dialog.get_by_role("alert")).to_contain_text("Non è stato possibile")
+    assert dialog.evaluate("element => element.contains(document.activeElement)")
     expect(
         dialog.get_by_text("Nessuna lettura nell’ambito selezionato.", exact=True)
     ).to_have_count(0)
     page.unroute("**/api/fermentations/*/readings?*")
     dialog.get_by_role("button", name="Riprova dati grezzi", exact=True).click()
     expect(table.get_by_role("row")).to_have_count(6)
+    assert dialog.evaluate("element => element.contains(document.activeElement)")
     expect(table.get_by_role("cell", name="1.060", exact=True)).to_be_visible()
     expect(dialog.get_by_role("button", name="Letture precedenti", exact=True)).to_be_disabled()
     dialog.get_by_role("button", name="Letture più recenti", exact=True).click()

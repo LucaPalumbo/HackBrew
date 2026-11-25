@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, useId } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, useId } from 'vue'
 import {
   measurements,
   formatMeasurement,
@@ -16,6 +16,10 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
+const heading = ref<HTMLHeadingElement>()
+const closeButton = ref<HTMLButtonElement>()
+const retryButton = ref<HTMLButtonElement>()
+const tableRegion = ref<HTMLDivElement>()
 const titleId = useId()
 const readings = ref<Reading[]>([])
 const latest = computed(() => readings.value.at(-1))
@@ -54,7 +58,11 @@ function trapFocus(event: KeyboardEvent) {
   )
   const first = controls?.[0],
     last = controls?.[controls.length - 1]
-  if (event.shiftKey && document.activeElement === first) {
+  if (
+    event.shiftKey &&
+    (document.activeElement === first ||
+      document.activeElement === heading.value)
+  ) {
     event.preventDefault()
     last?.focus()
   } else if (!event.shiftKey && document.activeElement === last) {
@@ -66,10 +74,26 @@ async function load(
   before: string | null = requestedBefore,
   direction: 'refresh' | 'older' | 'newer' = requestedDirection,
 ) {
+  const focusOrigin = document.activeElement
+  const keepFocus =
+    focusOrigin instanceof HTMLButtonElement &&
+    focusOrigin !== closeButton.value &&
+    dialog.value?.contains(focusOrigin)
+  let pendingFocus: HTMLHeadingElement | undefined
+  const canRestoreFocus = () => {
+    const current = document.activeElement
+    return (
+      dialog.value?.open &&
+      (current === document.body ||
+        current === dialog.value ||
+        current === focusOrigin ||
+        current === pendingFocus)
+    )
+  }
   requestedBefore = before
   requestedDirection = direction
   readings.value = []
-  return run(
+  const request = run(
     async (signal) => {
       const query = new URLSearchParams({
         limit: '200',
@@ -95,6 +119,24 @@ async function load(
       requestedDirection = 'refresh'
     },
   )
+  if (keepFocus) {
+    await nextTick()
+    if (canRestoreFocus()) {
+      pendingFocus = heading.value
+      pendingFocus?.focus({ preventScroll: true })
+    }
+  }
+  const accepted = await request
+  if (keepFocus && (accepted || error.value)) {
+    await nextTick()
+    if (canRestoreFocus()) {
+      const target =
+        (error.value ? retryButton.value : tableRegion.value) ??
+        closeButton.value
+      target?.focus({ preventScroll: true })
+    }
+  }
+  return accepted
 }
 onMounted(() => {
   dialog.value?.showModal()
@@ -116,10 +158,11 @@ onUnmounted(() => {
   >
     <header>
       <div>
-        <h2 :id="titleId">Dati grezzi</h2>
+        <h2 :id="titleId" ref="heading" tabindex="-1">Dati grezzi</h2>
         <p>{{ fermentationName }}</p>
       </div>
       <button
+        ref="closeButton"
         type="button"
         class="text-button"
         autofocus
@@ -158,7 +201,12 @@ onUnmounted(() => {
     <p v-if="loading" role="status">Caricamento dati grezzi…</p>
     <p v-else-if="error" role="alert">
       {{ error }}
-      <button type="button" class="text-button" @click="load()">
+      <button
+        ref="retryButton"
+        type="button"
+        class="text-button"
+        @click="load()"
+      >
         Riprova dati grezzi
       </button>
     </p>
@@ -190,6 +238,7 @@ onUnmounted(() => {
     </nav>
     <div
       v-if="!loading && !error && readings.length"
+      ref="tableRegion"
       class="readings-table"
       tabindex="0"
       aria-label="Scorri le letture storiche"
