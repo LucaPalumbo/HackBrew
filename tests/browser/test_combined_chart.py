@@ -34,7 +34,7 @@ def test_one_chart_exposes_seven_series_and_exact_values(
     page.goto(str(api.base_url) + "?fermentation=" + cycle["id"])
     chart = page.get_by_role("region", name="Grafico delle misure", exact=True)
     expect(chart.get_by_role("img", name="Grafico a linee: 1 lettura", exact=True)).to_be_visible()
-    expect(page.get_by_role("img")).to_have_count(1)
+    expect(chart.get_by_role("img")).to_have_count(1)
     legend = chart.get_by_role("group", name="Serie del grafico", exact=True)
     expect(legend.get_by_role("checkbox")).to_have_count(7)
     for index, label in enumerate(

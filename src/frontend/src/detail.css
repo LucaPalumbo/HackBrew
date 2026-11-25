@@ -68,7 +68,7 @@
 }
 .detail-chart-column .time-navigator {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px 14px;
   margin: 16px 0;
 }
@@ -77,11 +77,6 @@
   justify-content: flex-start;
   gap: 8px;
   margin: 8px 0;
-}
-.detail-chart-column .time-navigator > label {
-  margin: 4px 0;
-  min-width: 0;
-  font-size: 12px;
 }
 .detail-chart-column .time-navigator > p {
   grid-column: 1 / -1;
